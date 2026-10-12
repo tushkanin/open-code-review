@@ -63,3 +63,103 @@ The fixture remains outside the CLI's temporary directory.
 OCR_CLAUDE_SMOKE=1 OCR_CLAUDE_SMOKE_MODEL=sonnet \
   make test PACKAGES='./internal/llm -run=TestClaudeCodeRealSmoke'
 ```
+
+## Codex
+
+`NewCodexClient` implements the same contract through `codex exec`.
+The adapter supports codex-cli 0.162.1 only.
+Other releases return a compatibility error until their native controls receive a compatibility check.
+The provider registry, resolver, and IDE interfaces do not select this adapter yet.
+
+The adapter exports the bundled native catalog through `codex debug models --bundled`.
+The resolved model must match an exported identifier exactly.
+The request catalog preserves all native metadata except these approved capabilities:
+
+- `shell_type` becomes `disabled`.
+- `apply_patch_tool_type`, `tool_mode`, and `multi_agent_version` become null.
+- `experimental_supported_tools` becomes empty.
+- `node_repl_disabled` becomes true.
+- `supports_search_tool` becomes false.
+
+The startup `model_catalog_json` override uses this catalog without a remote refresh.
+Missing model metadata, missing capability fields, and unavailable feature controls return provider errors.
+The adapter does not invent model metadata or substitute a model alias.
+
+The invocation retains normal Codex user configuration, `CODEX_HOME`, and native authentication policy.
+Codex owns credentials and refresh.
+The adapter preserves authentication storage, backend selection, and provider routing.
+It uses no OCR API key, credential helper, or separate profile selector.
+It does not read `auth.json`, query the keyring, or copy credentials.
+
+Each request uses a fixed two-pass preflight before completion.
+Both passes validate effective feature values before a fresh strict stdio app-server starts.
+The first pass discovers MCP servers through `config/read` with `includeLayers=false`.
+The second pass applies one aggregate inline-table override with explicit `enabled=false` for every server.
+Recursive merge preserves each server's transport fields.
+The final check rejects new server identifiers, changed relevant context, and conflicting managed requirements from `configRequirements/read`.
+
+Both passes use the completion executable, environment, working directory, and common startup overrides.
+Preflight starts no thread, model turn, MCP transport, hook, or optional extension action.
+The reviewed `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1` marker disables preflight remote control.
+Strict configuration, disabled exec-policy rules, and the legacy read-only sandbox apply to completion.
+Inherited or managed permission profiles cannot replace that sandbox route.
+
+The temporary instructions file replaces native model instructions.
+Controlled nonempty compact instructions prevent an inherited compact-file fallback.
+Project instructions and automatic skill instructions remain disabled.
+Cloud skills, workspace dependencies, plugins, apps, hooks, and host skill discovery remain disabled.
+An empty notification list disables legacy external notifications separately from structured hooks.
+Mandatory native instructions and compatible administrative policies still apply.
+
+Native configuration responses can contain credentials and private instructions.
+The adapter receives bounded responses in local memory.
+It retains safety fields, server identifiers, non-secret origin types, and a digest of the relevant configuration context.
+It puts no raw configuration response, private instruction text, or unknown native protocol error in logs, errors, prompts, files, or telemetry.
+The native API does not guarantee secret redaction.
+
+The native API omits two utility booleans: `tools.update_plan.enabled` and `tools.experimental_request_user_input.enabled`.
+Their exact winning origins must identify the known false session overrides.
+The reviewed native source connects those leaves directly to their runtime values.
+Missing or non-session origins cause a provider error.
+
+The isolation proof assumes stable configuration and managed policy from the first preflight through exec and thread startup.
+Codex reloads configuration after preflight.
+The comparison detects some changes but does not close the later race.
+The adapter adds no retry, policy bypass, or race-free isolation claim.
+
+Native feature controls disable shell, image, browser, computer, code execution, subagent, and tool-suggestion categories.
+Additional controls disable utility tools: plans, user questions, permissions, deferred environments, token budgets, clocks, sleep, and asynchronous messages.
+The read-only sandbox adds a constraint; it does not replace these tool gates.
+The compatibility basis is the 0.162.1 native tool registry and configuration schema.
+See `codex-rs/core/src/tools/spec_plan.rs` and `codex-rs/config/src/config_toml.rs` in that release.
+
+The decoder accepts structured `agent_message` output only after `turn.completed` and a successful process exit.
+It rejects native tool items, failed events, unknown events, malformed output, and incomplete streams.
+The native `suppress_unstable_features_warning=true` option prevents the informational feature-stage notice before Codex creates it.
+The option does not change feature values or suppress configuration warnings, model reroutes, or fatal events.
+The required `skip_host_skill_discovery` feature remains enabled.
+Remaining `error` items represent unclassified provider conditions.
+The decoder rejects them because JSONL loses their original notification kind.
+The decoder does not accept notices by their position or message text.
+Actual input and output counts determine usage.
+Reported cached input and cache-write counts reach their existing fields without another addition to prompt tokens.
+Absent usage remains absent.
+
+The transcript retains request limits, including `MaxTokens`.
+Codex has no documented native hard output-token cap.
+The adapter supplies prompt guidance, not an enforced output-token cap.
+The same request deadline covers compatibility commands, catalog export, both preflight passes, and completion.
+Every command uses bounded output, a one-second pipe wait, and the request scratch directory.
+Unix cancellation stops the process group.
+Windows process controls need a separate runtime exercise.
+
+The opt-in exercise checks text output and a two-turn OCR registry call with a random fixture.
+The decoder rejects native tool events during all real requests.
+The exercise also checks actual usage, model selection, call identifiers, and temporary cleanup.
+The retained-config exercise succeeds on codex-cli 0.162.1 with `gpt-6.1-sol` and no OCR API key.
+OCR executes `file_read` once, and the next completion returns the exact random fixture value.
+
+```sh
+OCR_CODEX_SMOKE=1 OCR_CODEX_SMOKE_MODEL=gpt-6.1-sol \
+  make test PACKAGES='./internal/llm -run=TestCodexRealSmoke'
+```
