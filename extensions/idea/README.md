@@ -40,6 +40,23 @@ An IntelliJ IDEA plugin built on the [`open-code-review`](https://www.npmjs.com/
 
    The config is written to `~/.opencodereview/config.json`.
 
+### Draft connection checks
+
+Draft checks use a temporary OCR home and leave the saved configuration unchanged.
+The child process retains `CLAUDE_CONFIG_DIR` and `CODEX_HOME` from the effective shell environment.
+Without an override, it uses `.claude` and `.codex` under the original home.
+The plugin does not read or copy CLI credentials.
+The plugin removes the temporary OCR home after each check.
+
+To test the launch path with real Claude authentication, run:
+
+```bash
+OCR_IDE_AUTH_SMOKE=1 ./gradlew test -PskipFrontend=true --tests '*CliServiceAuthTest'
+```
+
+This opt-in test requires Node.js and an authenticated `claude` CLI on a POSIX system.
+It invokes Claude through the draft child environment, not through the OCR provider registry.
+
 ---
 
 ## Development

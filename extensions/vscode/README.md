@@ -40,6 +40,25 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
 
    The config is written to `~/.opencodereview/config.json`.
 
+### Draft connection checks
+
+Draft checks use a temporary OCR home and leave the saved configuration unchanged.
+The child process retains `CLAUDE_CONFIG_DIR` and `CODEX_HOME` from the effective shell environment.
+Without an override, it uses `.claude` and `.codex` under the original home.
+The extension does not read or copy CLI credentials.
+The extension removes the temporary OCR home after each check.
+
+To test the launch path with real Claude authentication, run:
+
+```bash
+OCR_IDE_AUTH_SMOKE=1 yarn test --runInBand CliService.auth.test.ts
+```
+
+This opt-in test requires Node.js and an authenticated `claude` CLI on a POSIX system.
+It invokes Claude through the draft child environment, not through the OCR provider registry.
+Executable fixture tests skip Windows because their launcher uses a POSIX shebang.
+The mocked Windows test checks authentication roots and both home variables without a child process.
+
 ---
 
 ## Development

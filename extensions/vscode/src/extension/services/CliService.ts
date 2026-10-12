@@ -4,6 +4,8 @@
 import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
+import { homedir } from 'os';
+import { join } from 'path';
 import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
@@ -148,6 +150,12 @@ export class CliService {
   async testConnection(options?: { home?: string }): Promise<{ ok: boolean; message?: string }> {
     const envExtra: Record<string, string> = {};
     if (options?.home) {
+      const originalEnv = getShellEnv();
+      const originalHome = process.platform === 'win32'
+        ? originalEnv.USERPROFILE || originalEnv.HOME || homedir()
+        : originalEnv.HOME || homedir();
+      envExtra.CLAUDE_CONFIG_DIR = originalEnv.CLAUDE_CONFIG_DIR ?? join(originalHome, '.claude');
+      envExtra.CODEX_HOME = originalEnv.CODEX_HOME ?? join(originalHome, '.codex');
       envExtra.HOME = options.home;
       if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
     }
