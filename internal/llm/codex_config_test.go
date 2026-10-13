@@ -129,6 +129,9 @@ func TestCodexConfigurationContext(t *testing.T) {
 			response, requirements, controls := codexTestProjection(t)
 			cfg := response["config"].(map[string]any)
 			cfg["cli_auth_credentials_store"] = store
+			cfg["model_reasoning_effort"] = "high"
+			origins := response["origins"].(map[string]any)
+			origins["model_reasoning_effort"] = map[string]any{"name": map[string]any{"type": "user"}}
 			setCodexTestField(cfg, "features.secret_auth_storage", true)
 			cfg["chatgpt_base_url"] = "https://native.invalid"
 			servers := cfg["mcp_servers"].(map[string]any)
@@ -142,7 +145,18 @@ func TestCodexConfigurationContext(t *testing.T) {
 			if err != nil || !first.sameContext(second) {
 				t.Fatalf("expected server override changes context: %v", err)
 			}
-			origins := response["origins"].(map[string]any)
+			cfg["model_reasoning_effort"] = "low"
+			changedEffort, err := validateCodexConfig(encodeCodexTestProjection(t, response), encodeCodexTestProjection(t, requirements), controls, true)
+			if err != nil || first.sameContext(changedEffort) {
+				t.Fatal("native reasoning effort change remains undetected")
+			}
+			cfg["model_reasoning_effort"] = "high"
+			origins["model_reasoning_effort"] = map[string]any{"name": map[string]any{"type": "system"}}
+			changedEffortOrigin, err := validateCodexConfig(encodeCodexTestProjection(t, response), encodeCodexTestProjection(t, requirements), controls, true)
+			if err != nil || first.sameContext(changedEffortOrigin) {
+				t.Fatal("native reasoning effort origin change remains undetected")
+			}
+			origins["model_reasoning_effort"] = map[string]any{"name": map[string]any{"type": "user"}}
 			originalOrigin := origins["approval_policy"]
 			origins["approval_policy"] = map[string]any{"name": map[string]any{"type": "system"}}
 			changedOrigin, err := validateCodexConfig(encodeCodexTestProjection(t, response), encodeCodexTestProjection(t, requirements), controls, true)

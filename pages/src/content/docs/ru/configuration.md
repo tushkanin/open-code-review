@@ -82,6 +82,33 @@ Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP 
 проверит модель при отправке запроса. Для пользовательских провайдеров действуют
 прежние правила проверки `--model`.
 
+### Усилия нативного рассуждения
+
+Задайте `reasoning_effort` в записи каждого нативного провайдера в `~/.opencodereview/config.json`:
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+Это значение переопределяет `CLAUDE_CODE_EFFORT_LEVEL` для Claude или нативный `model_reasoning_effort` для Codex.
+Удалите поле или задайте `""`, чтобы сохранить настройку нативного CLI.
+Допустимые значения зависят от нативного CLI и выбранной модели.
+Пользовательские провайдеры с `claude-code-cli` или `codex-cli` поддерживают то же поле.
+HTTP-провайдеры используют `extra_body` для параметров запроса конкретной модели.
+Поле верхнего уровня `effort` и флаг `--effort` по-прежнему задают раунды ревью OCR, а не рассуждение модели.
+
 ### Переопределение Base URL встроенного провайдера
 
 У каждого встроенного провайдера есть предустановленный Base URL

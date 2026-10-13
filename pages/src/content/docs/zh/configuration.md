@@ -75,6 +75,33 @@ Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP 
 stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
 `--model` 校验规则。
 
+### 原生推理投入档位
+
+在 `~/.opencodereview/config.json` 的原生 provider 条目中设置 `reasoning_effort`：
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+该值覆盖 Claude 的 `CLAUDE_CODE_EFFORT_LEVEL` 或 Codex 原生配置的 `model_reasoning_effort`。
+省略此字段或将其设为 `""` 可保留原生 CLI 设置。
+支持的值取决于原生 CLI 和所选模型。
+使用 `claude-code-cli` 或 `codex-cli` 的自定义 provider 也支持此字段。
+HTTP provider 使用 `extra_body` 配置模型专属请求选项。
+顶层 `effort` 和 `--effort` 仍控制 OCR 评审轮数，而不是模型推理。
+
 ### 覆盖内置 provider 的 Base URL
 
 每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider

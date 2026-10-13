@@ -1300,19 +1300,9 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 // map cloning) can safely mutate the returned value without aliasing the
 // original's slice or map fields.
 func cloneProviderEntry(v ProviderEntry) ProviderEntry {
-	out := ProviderEntry{
-		APIKey:     v.APIKey,
-		APIKeyCmd:  v.APIKeyCmd,
-		URL:        v.URL,
-		Protocol:   v.Protocol,
-		Model:      v.Model,
-		Models:     append([]string(nil), v.Models...),
-		AuthHeader: v.AuthHeader,
-		TimeoutSec: v.TimeoutSec,
-		RetryCodes: append([]int(nil), v.RetryCodes...),
-		AWSProfile: v.AWSProfile,
-		AWSRegion:  v.AWSRegion,
-	}
+	out := v
+	out.Models = append([]string(nil), v.Models...)
+	out.RetryCodes = append([]int(nil), v.RetryCodes...)
 	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))

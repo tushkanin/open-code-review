@@ -90,6 +90,9 @@ func (c *CodexClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (
 		}
 	}
 	controls := codexControls(req.Model, dir)
+	if c.cfg.ReasoningEffort != "" {
+		controls = append(controls, codexControl{"model_reasoning_effort", c.cfg.ReasoningEffort})
+	}
 	args := codexControlArgs(controls)
 	var first *codexConfigSnapshot
 	for pass := range 2 {

@@ -18,15 +18,16 @@ import (
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
-	URL          string
-	Token        string
-	Model        string
-	Provider     string
-	Protocol     string            // canonical protocol name (see protocol.go); resolver normalizes aliases
-	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
-	Source       string            // human-readable config source label
-	ExtraBody    map[string]any    // vendor-specific request body fields
-	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	URL             string
+	Token           string
+	Model           string
+	ReasoningEffort string
+	Provider        string
+	Protocol        string            // canonical protocol name (see protocol.go); resolver normalizes aliases
+	AuthHeader      string            // Anthropic auth header: "x-api-key" or "authorization"
+	Source          string            // human-readable config source label
+	ExtraBody       map[string]any    // vendor-specific request body fields
+	ExtraHeaders    map[string]string // extra HTTP headers for the LLM request
 	// Timeout is the request timeout; zero uses the client default of five minutes.
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
@@ -338,17 +339,18 @@ type llmFileConfig struct {
 
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	APIKey          string            `json:"api_key,omitempty"`
+	APIKeyCmd       string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
+	URL             string            `json:"url,omitempty"`
+	Protocol        string            `json:"protocol,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	Models          []string          `json:"models,omitempty"`
+	AuthHeader      string            `json:"auth_header,omitempty"`
+	TimeoutSec      int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody       map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders    map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes      []int             `json:"retry_codes,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -587,20 +589,21 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		URL:             url,
+		Token:           apiKey,
+		Model:           model,
+		ReasoningEffort: strings.TrimSpace(entry.ReasoningEffort),
+		Provider:        cfg.Provider,
+		Protocol:        protocol,
+		AuthHeader:      authHeader,
+		Source:          "provider:" + cfg.Provider,
+		ExtraBody:       extraBody,
+		ExtraHeaders:    extraHeaders,
+		Timeout:         timeout,
+		RetryCodes:      retryCodes,
+		AmbientAuth:     ambientAuth,
+		AWSProfile:      entry.AWSProfile,
+		AWSRegion:       entry.AWSRegion,
 	}, true, nil
 }
 

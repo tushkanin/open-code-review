@@ -72,6 +72,9 @@ func (c *ClaudeCodeClient) CompletionsWithCtx(ctx context.Context, req ChatReque
 	if req.MaxTokens > 0 {
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS="+strconv.Itoa(req.MaxTokens))
 	}
+	if c.cfg.ReasoningEffort != "" {
+		cmd.Env = append(cmd.Env, "CLAUDE_CODE_EFFORT_LEVEL="+c.cfg.ReasoningEffort)
+	}
 	runErr := cmd.Run()
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("Claude Code completion: %w", ctx.Err())

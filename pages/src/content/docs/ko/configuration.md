@@ -71,6 +71,33 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
 
+### 네이티브 추론 강도 {#native-reasoning-effort}
+
+`~/.opencodereview/config.json`의 각 네이티브 프로바이더 항목에 `reasoning_effort`를 설정하세요:
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+이 값은 Claude의 `CLAUDE_CODE_EFFORT_LEVEL` 또는 Codex의 네이티브 `model_reasoning_effort` 설정을 재정의합니다.
+필드를 생략하거나 `""`로 설정하면 네이티브 CLI 설정을 유지합니다.
+지원하는 값은 네이티브 CLI와 선택한 모델에 따라 다릅니다.
+`claude-code-cli` 또는 `codex-cli`를 사용하는 커스텀 프로바이더도 같은 필드를 지원합니다.
+HTTP 프로바이더는 모델별 요청 옵션에 `extra_body`를 사용합니다.
+최상위 `effort`와 `--effort`는 모델 추론이 아니라 OCR 리뷰 라운드 수를 제어합니다.
+
 ### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
 모든 내장 프로바이더에는 미리 설정된 Base URL이 있습니다(위 표 참고). 내장 프로바이더를 다른 엔드포인트로 보내려면 `providers.<name>.url`을 설정합니다(예: 자체 호스팅 LiteLLM 게이트웨이는 미리 설정된 기본값 `http://localhost:4000/v1`에 있는 경우가 드뭅니다):

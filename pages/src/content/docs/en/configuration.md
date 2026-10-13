@@ -79,6 +79,33 @@ restrictions on `--model`. An override absent from both the built-in list and
 the model when the request is sent. Custom providers retain their existing
 `--model` validation rules.
 
+### Native reasoning effort
+
+Set `reasoning_effort` inside each native provider entry in `~/.opencodereview/config.json`:
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+This value overrides Claude's `CLAUDE_CODE_EFFORT_LEVEL` or Codex's native `model_reasoning_effort`.
+Omit the field or set it to `""` to retain the native CLI setting.
+Supported values depend on the native CLI and selected model.
+Custom providers with `claude-code-cli` or `codex-cli` accept the same field.
+HTTP providers use `extra_body` for model-specific request options.
+The top-level `effort` and `--effort` still control OCR review rounds, not model reasoning.
+
 ### Overriding a built-in provider's Base URL
 
 Every built-in provider has a preset Base URL (shown in the table above).

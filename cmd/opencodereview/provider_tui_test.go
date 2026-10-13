@@ -3105,18 +3105,18 @@ func TestProviderTUI_HTTPToNativeCredentialIsolation(t *testing.T) {
 	for _, name := range []string{"claude-code", "codex"} {
 		for _, protocol := range []string{"", llm.ProtocolOpenAIChatCompletions} {
 			t.Run(name+"/"+protocol, func(t *testing.T) {
-				httpEntry := ProviderEntry{APIKey: "http-secret", Model: "gpt-4o"}
+				httpEntry := ProviderEntry{APIKey: "http-secret", Model: "gpt-4o", ExtraBody: map[string]any{"reasoning_effort": "low"}}
 				model := "sonnet"
 				if name == "codex" {
 					model = "gpt-6.1-sol"
 				}
-				targetEntry := ProviderEntry{Model: model, Protocol: protocol}
+				targetEntry := ProviderEntry{Model: model, Protocol: protocol, ReasoningEffort: "high"}
 				if protocol != "" {
 					targetEntry.APIKey = "override-secret"
 					targetEntry.URL = "https://example.com/v1"
 				}
 				unrelatedEntry := ProviderEntry{APIKey: "unrelated-secret", Model: "other-model"}
-				customEntry := ProviderEntry{APIKey: "custom-secret", Model: "custom-model", Protocol: llm.ProtocolOpenAIChatCompletions, URL: "https://custom.example.com/v1"}
+				customEntry := ProviderEntry{APIKey: "custom-secret", Model: "custom-model", Protocol: llm.ProtocolCodexCLI, ReasoningEffort: "medium"}
 				cfg := &Config{
 					Provider: "openai",
 					Model:    httpEntry.Model,
@@ -3199,12 +3199,13 @@ func TestProviderTUI_CustomCredentialIsolation(t *testing.T) {
 				target := ProviderEntry{
 					APIKey: targetKey, Model: "target-model", Models: []string{"target-model", "other-model"},
 					Protocol: protocol, APIKeyCmd: "target-helper", TimeoutSec: 37,
+					ReasoningEffort: "high",
 				}
 				if !llm.UsesAmbientAuth(protocol) {
 					target.URL = "https://target.example.com/v1"
 					target.AuthHeader = "x-api-key"
 				}
-				source := ProviderEntry{APIKey: "http-secret", Model: "gpt-4o"}
+				source := ProviderEntry{APIKey: "http-secret", Model: "gpt-4o", ExtraBody: map[string]any{"reasoning_effort": "low"}}
 				boundary := ProviderEntry{
 					APIKey: "boundary-secret", Model: "boundary-model", Models: []string{"boundary-model"},
 					Protocol: llm.ProtocolOpenAIChatCompletions, URL: "https://boundary.example.com/v1",

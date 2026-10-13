@@ -25,6 +25,29 @@ Existing Official and Custom selections retain only that entry's saved key, incl
 Ambient protocols ignore that key and do not execute its credential helper.
 Configure a URL override with `ocr config set providers.<name>.url <url>`.
 
+## Native reasoning effort
+
+Set `providers.claude-code.reasoning_effort` or `providers.codex.reasoning_effort` in OCR's `config.json`.
+Custom entries with native CLI protocols accept the same field.
+
+```sh
+ocr config set providers.claude-code.reasoning_effort high
+ocr config set providers.codex.reasoning_effort high
+```
+
+The selected native model determines which effort values it supports.
+OCR passes the value to the native CLI without a separate effort list.
+HTTP providers continue to use `extra_body` for model-specific request options.
+
+An explicit Claude value replaces the inherited `CLAUDE_CODE_EFFORT_LEVEL`.
+An explicit Codex value sets `model_reasoning_effort` for both preflight passes and completion.
+OCR checks that Codex applies the requested value.
+Codex effort values and origins also participate in the preflight context comparison.
+
+Omit the field or set it to an empty string to retain the native CLI setting.
+For example, `ocr config set providers.codex.reasoning_effort ""` removes the override.
+This field does not change OCR's top-level `effort` or `--effort`, which controls review rounds.
+
 ## Request and response
 
 Each request starts a fresh `claude -p` process in a temporary directory outside the repository.

@@ -76,6 +76,33 @@ Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP 
 指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
 検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
 
+### ネイティブの推論 effort
+
+`~/.opencodereview/config.json` の各ネイティブ provider に `reasoning_effort` を設定します:
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+この値は Claude の `CLAUDE_CODE_EFFORT_LEVEL` または Codex のネイティブ設定 `model_reasoning_effort` を上書きします。
+フィールドを省略するか `""` に設定すると、ネイティブ CLI の設定を保持します。
+使用できる値はネイティブ CLI と選択したモデルによって異なります。
+`claude-code-cli` または `codex-cli` のカスタム provider も同じフィールドを使用できます。
+HTTP provider では、モデル固有のリクエスト設定に `extra_body` を使用します。
+トップレベルの `effort` と `--effort` は OCR のレビューラウンド数を制御します。モデルの推論 effort は変更しません。
+
 ### 組み込み provider の Base URL を上書きする
 
 各組み込み provider にはプリセット Base URL があります（上表を参照）。

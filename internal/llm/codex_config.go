@@ -345,7 +345,7 @@ func validateCodexConfig(configData, requirementsData []byte, controls []codexCo
 		sort.Strings(ids)
 	}
 	// Only digests survive the response scope; unknown values never enter diagnostics.
-	for _, key := range []string{"model_provider", "model_providers", "cli_auth_credentials_store", "chatgpt_base_url", "forced_login_method", "forced_chatgpt_workspace_id", "features"} {
+	for _, key := range []string{"model_reasoning_effort", "model_provider", "model_providers", "cli_auth_credentials_store", "chatgpt_base_url", "forced_login_method", "forced_chatgpt_workspace_id", "features"} {
 		contextValues[key] = cfg[key]
 	}
 	contextValues["requirements"] = req
