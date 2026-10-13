@@ -157,6 +157,16 @@ make build              # 产出 dist/opencodereview（Windows 上是 dist/openc
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
+在 Linux 和 macOS 上，也可以构建当前检出版本并安装到 `$HOME/.local/bin`：
+
+```bash
+sh install.sh --local
+```
+
+设置 `OCR_INSTALL_DIR` 可指定其他安装目录。
+脚本在临时目录中构建，不修改 `dist/`。
+它不会下载发布版本。
+
 #### 为其他平台构建
 
 ```bash

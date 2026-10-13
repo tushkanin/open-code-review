@@ -176,6 +176,16 @@ make build              # writes dist/opencodereview (dist/opencodereview.exe on
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
+On Linux and macOS, you can instead build and install this checkout into `$HOME/.local/bin`:
+
+```bash
+sh install.sh --local
+```
+
+Set `OCR_INSTALL_DIR` to use another destination.
+The script builds in a temporary directory and keeps `dist/` unchanged.
+It does not download a release.
+
 #### Build for another platform
 
 ```bash

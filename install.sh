@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 alibaba/open-code-review Contributors
 
-# Install the ocr (Open Code Review) CLI from GitHub releases.
+# Install the ocr (Open Code Review) CLI from GitHub releases or this checkout.
 #   curl -fsSL https://open-codereview.ai/install.sh | sh
 # Prefer to inspect first:
 #   curl -fsSL https://open-codereview.ai/install.sh -o install.sh
 #   less install.sh && sh install.sh
-# Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest),
+# Local source: sh install.sh --local
+# Local installs default to $HOME/.local/bin and require Go, Git, and Make.
+# Env: OCR_INSTALL_DIR (release: /usr/local/bin; local: $HOME/.local/bin),
+# OCR_VERSION (release only; default latest),
 # OCR_GITHUB_MIRROR (default unset; download the binary through a mirror domain).
 set -eu
 
@@ -17,6 +20,25 @@ main() {
   BIN="ocr"
   ASSET_PREFIX="opencodereview"
   INSTALL_DIR="${OCR_INSTALL_DIR:-/usr/local/bin}"
+
+  case "${1:-}" in
+    --local)
+      [ "$#" -eq 1 ] || err "usage: sh install.sh [--local]"
+      install_local
+      return
+      ;;
+    --help|-h)
+      printf 'Usage: sh install.sh [--local]\n\n'
+      printf 'Without arguments, install a GitHub release into /usr/local/bin.\n'
+      printf 'With --local, build this checkout and install into $HOME/.local/bin.\n'
+      printf 'Set OCR_INSTALL_DIR to override either destination.\n'
+      printf 'OCR_VERSION and OCR_GITHUB_MIRROR apply only to release installation.\n'
+      return
+      ;;
+    "") [ "$#" -eq 0 ] || err "usage: sh install.sh [--local]" ;;
+    *) err "unknown argument: $1 (use --help)" ;;
+  esac
+
   VERSION="${OCR_VERSION:-}"
 
   command -v curl >/dev/null 2>&1 || err "curl is required"
@@ -72,6 +94,43 @@ main() {
   install_binary "$tmp/$asset" "$INSTALL_DIR" "$BIN"
 
   printf 'installed %s %s -> %s\n' "$BIN" "$VERSION" "$INSTALL_DIR/$BIN"
+  post_install_path_notice "$BIN" "$INSTALL_DIR"
+}
+
+install_local() {
+  case "$(uname -s)" in
+    Darwin|Linux) ;;
+    *) err "local installation supports Linux and macOS" ;;
+  esac
+  command -v go >/dev/null 2>&1 || err "Go is required for local installation"
+  command -v git >/dev/null 2>&1 || err "Git is required for local installation"
+  command -v make >/dev/null 2>&1 || err "Make is required for local installation"
+
+  [ -f "$0" ] || err "--local requires a script file; run sh install.sh --local from the checkout"
+  source_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" ||
+    err "could not locate the source checkout"
+  [ -f "$source_dir/go.mod" ] && [ -f "$source_dir/Makefile" ] &&
+    [ -d "$source_dir/cmd/opencodereview" ] ||
+    err "--local requires install.sh from a source checkout"
+
+  if [ -n "${OCR_INSTALL_DIR:-}" ]; then
+    INSTALL_DIR="$OCR_INSTALL_DIR"
+  else
+    [ -n "${HOME:-}" ] || err "HOME is unset; set OCR_INSTALL_DIR for local installation"
+    INSTALL_DIR="$HOME/.local/bin"
+  fi
+
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' INT TERM EXIT
+  printf 'building %s from %s...\n' "$BIN" "$source_dir"
+  host_os="$(go env GOHOSTOS)" || err "could not detect the Go host OS"
+  host_arch="$(go env GOHOSTARCH)" || err "could not detect the Go host architecture"
+  GOOS="$host_os" GOARCH="$host_arch" make -C "$source_dir" build DIST_DIR="$tmp" ||
+    err "local build failed"
+  "$tmp/opencodereview" version >/dev/null 2>&1 ||
+    err "local build is not runnable on this host"
+  install_binary "$tmp/opencodereview" "$INSTALL_DIR" "$BIN"
+  printf 'installed %s from local source -> %s\n' "$BIN" "$INSTALL_DIR/$BIN"
   post_install_path_notice "$BIN" "$INSTALL_DIR"
 }
 

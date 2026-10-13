@@ -160,6 +160,16 @@ make build              # dist/opencodereview を生成（Windows では dist/op
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
+Linux と macOS では、次のコマンドでこのチェックアウトをビルドし、`$HOME/.local/bin` にインストールできます:
+
+```bash
+sh install.sh --local
+```
+
+別のインストール先を使うには、`OCR_INSTALL_DIR` を設定します。
+スクリプトは一時ディレクトリでビルドし、`dist/` を変更しません。
+リリースはダウンロードしません。
+
 #### 他のプラットフォーム向けにビルドする
 
 ```bash

@@ -148,6 +148,16 @@ make build              # dist/opencodereview 생성 (Windows에서는 dist/open
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
+Linux와 macOS에서는 다음 명령으로 현재 체크아웃을 빌드하고 `$HOME/.local/bin`에 설치할 수 있습니다:
+
+```bash
+sh install.sh --local
+```
+
+다른 설치 경로를 사용하려면 `OCR_INSTALL_DIR`을 설정하세요.
+스크립트는 임시 디렉터리에서 빌드하며 `dist/`를 변경하지 않습니다.
+릴리스를 다운로드하지 않습니다.
+
 #### 다른 플랫폼용 빌드 {#build-for-another-platform}
 
 ```bash
