@@ -17,6 +17,8 @@ import (
 //   - ProtocolOpenAIChatCompletions ("openai")
 //   - ProtocolOpenAIResponses ("openai-responses")
 //   - ProtocolAnthropicBedrock ("anthropic-bedrock")
+//   - ProtocolClaudeCodeCLI ("claude-code-cli")
+//   - ProtocolCodexCLI ("codex-cli")
 //
 // To add a built-in provider that speaks a different protocol, set Protocol
 // accordingly and ensure NewLLMClient has a matching case.
@@ -29,17 +31,28 @@ type Provider struct {
 	EnvVar      string // environment variable name for API key fallback
 	Models      []string
 
-	// AmbientAuth marks a provider whose credentials come from the
-	// environment's own chain rather than an api_key — AWS SigV4, for
-	// instance. The resolver skips its api_key requirement for these, because
-	// there is no key to configure and demanding one would make the provider
-	// impossible to use.
+	// AmbientAuth identifies presets that use AWS or native CLI authentication.
+	// The effective protocol decides whether an entry needs OCR credentials.
 	AmbientAuth bool
 }
 
 // After modifying the built-in provider registry, run `go generate ./internal/llm`
 // and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
+	{
+		Name:        "claude-code",
+		DisplayName: "Claude Code CLI",
+		Protocol:    ProtocolClaudeCodeCLI,
+		AmbientAuth: true,
+		Models:      []string{"sonnet"},
+	},
+	{
+		Name:        "codex",
+		DisplayName: "Codex CLI",
+		Protocol:    ProtocolCodexCLI,
+		AmbientAuth: true,
+		Models:      []string{"gpt-6.1-sol"},
+	},
 	{
 		Name:        "anthropic",
 		DisplayName: "Anthropic Claude API",

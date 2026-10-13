@@ -27,7 +27,7 @@ describe('generated provider presets', () => {
     }
   });
 
-  it.each(['bedrock', 'openai-responses'])('uses the built-in configuration path for %s', (name) => {
+  it.each(['bedrock', 'openai-responses', 'claude-code', 'codex'])('uses the built-in configuration path for %s', (name) => {
     const preset = lookupPreset(name);
     expect(preset).toBeDefined();
     const model = preset?.models[0] ?? '';
@@ -64,6 +64,12 @@ describe('generated provider presets', () => {
     expect(usesAmbientAuth(bedrock!, 'openai')).toBe(false);
     expect(usesAmbientAuth(openai!, 'anthropic-bedrock')).toBe(true);
     expect(usesAmbientAuth(openai!, ' OPENAI ')).toBe(false);
+    for (const name of ['claude-code', 'codex']) {
+      const preset = lookupPreset(name)!;
+      expect(usesAmbientAuth(preset)).toBe(true);
+      expect(usesAmbientAuth(preset, 'openai')).toBe(false);
+      expect(usesAmbientAuth(openai!, preset.protocol)).toBe(true);
+    }
   });
 
   it('keeps unknown providers outside the built-in preset path', () => {

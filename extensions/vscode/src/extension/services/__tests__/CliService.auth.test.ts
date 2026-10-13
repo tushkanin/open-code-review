@@ -140,4 +140,40 @@ describe('draft authentication roots', () => {
     expect(record.codex).toBe(original.CODEX_HOME ?? join(original.HOME || os.homedir(), '.codex'));
     expect(existsSync(originalSavedPath) ? readFileSync(originalSavedPath, 'utf8') : undefined).toBe(originalSaved);
   }, 150000);
+
+  const integrationTest = process.env.OCR_INTEGRATION_BINARY ? fixtureTest : it.skip;
+  integrationTest.each([
+    ['claude-code', 'sonnet'],
+    ['codex', 'gpt-6.1-sol'],
+  ])('tests %s through the real OCR resolver and factory', async (provider, model) => {
+    env = { ...liveEnv };
+    const nativeHome = liveEnv.HOME || os.homedir();
+    env.CLAUDE_CONFIG_DIR = liveEnv.CLAUDE_CONFIG_DIR ?? join(nativeHome, '.claude');
+    env.CODEX_HOME = liveEnv.CODEX_HOME ?? join(nativeHome, '.codex');
+    cli = new CliService(process.env.OCR_INTEGRATION_BINARY!);
+    config = new ConfigService(cli);
+    const savedPath = join(savedHome, '.opencodereview/config.json');
+    const saved = readFileSync(savedPath, 'utf8');
+    const launch = cli.runRaw.bind(cli);
+    let draftHome = '';
+    jest.spyOn(cli, 'runRaw').mockImplementation(async (args, cwd, onLine, overrides) => {
+      draftHome = overrides?.HOME || '';
+      expect(overrides?.CLAUDE_CONFIG_DIR).toBe(env.CLAUDE_CONFIG_DIR);
+      expect(overrides?.CODEX_HOME).toBe(env.CODEX_HOME);
+      const draft = JSON.parse(readFileSync(join(draftHome, '.opencodereview/config.json'), 'utf8'));
+      expect(draft.providers[provider].model).toBe(model);
+      expect(draft.custom_providers?.[provider]).toBeUndefined();
+      const output = await launch(args, cwd, onLine, overrides);
+      expect(output).toContain('Tool-call round trip verified');
+      return output;
+    });
+    const entries = [{ key: 'provider', value: provider }, { key: `providers.${provider}.model`, value: model }];
+    expect(await config.testWithEntries(entries)).toEqual({ ok: true });
+    expect(existsSync(draftHome)).toBe(false);
+    expect(readFileSync(savedPath, 'utf8')).toBe(saved);
+    env.PATH = dir;
+    expect((await config.testWithEntries(entries)).ok).toBe(false);
+    expect(existsSync(draftHome)).toBe(false);
+    expect(readFileSync(savedPath, 'utf8')).toBe(saved);
+  }, 180000);
 });

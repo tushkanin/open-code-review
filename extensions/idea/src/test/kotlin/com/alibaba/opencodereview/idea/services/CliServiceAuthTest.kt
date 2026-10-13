@@ -63,6 +63,50 @@ class CliServiceAuthTest {
         assertEquals(saved, savedPath.takeIf(File::exists)?.readText())
     }
 
+    @Test
+    fun `native providers complete through the real OCR draft path`() {
+        val binary = System.getenv("OCR_INTEGRATION_BINARY")
+        assumeTrue(binary != null)
+        assumeTrue(!System.getProperty("os.name").startsWith("Windows"))
+        val original = ShellEnv.env().toMap()
+        val originalHome = System.getProperty("user.home")
+        val cache = ShellEnv::class.java.getDeclaredField("cachedEnv").apply { isAccessible = true }
+        val originalCache = cache.get(ShellEnv)
+        val dir = Files.createTempDirectory("ocr-integration-").toFile()
+        val tempRoot = File(System.getProperty("java.io.tmpdir"))
+        val before = tempRoot.listFiles()!!.filter { it.name.startsWith("ocr-test-home-") }.map { it.name }.toSet()
+        try {
+            val savedPath = File(dir, ".opencodereview/config.json")
+            savedPath.parentFile.mkdirs()
+            val saved = """{"provider":"openai","providers":{"openai":{"api_key":"saved-key","model":"saved-model"}}}"""
+            savedPath.writeText(saved)
+            System.setProperty("user.home", dir.path)
+            val env = original.toMutableMap()
+            System.getenv("OCR_INTEGRATION_PATH")?.let { env["PATH"] = it }
+            val home = original["HOME"] ?: originalHome
+            env.putIfAbsent("CLAUDE_CONFIG_DIR", File(home, ".claude").path)
+            env.putIfAbsent("CODEX_HOME", File(home, ".codex").path)
+            cache.set(ShellEnv, env)
+            val config = ConfigService(CliService(binary!!))
+            for ((provider, model) in listOf("claude-code" to "sonnet", "codex" to "gpt-6.1-sol")) {
+                val entries = listOf(ConfigEntry("provider", provider), ConfigEntry("providers.$provider.model", model))
+                val result = config.testWithEntries(entries)
+                assertTrue(result.first, result.second)
+                assertEquals(saved, savedPath.readText())
+                val path = env["PATH"]
+                env["PATH"] = dir.path
+                assertFalse(config.testWithEntries(entries).first)
+                if (path != null) env["PATH"] = path else env.remove("PATH")
+                assertEquals(saved, savedPath.readText())
+                assertEquals(before, tempRoot.listFiles()!!.filter { it.name.startsWith("ocr-test-home-") }.map { it.name }.toSet())
+            }
+        } finally {
+            cache.set(ShellEnv, originalCache)
+            System.setProperty("user.home", originalHome)
+            dir.deleteRecursively()
+        }
+    }
+
     private fun withDraft(block: (MutableMap<String, String>, (Boolean) -> kotlinx.serialization.json.JsonObject) -> Unit) {
         assumeTrue(!System.getProperty("os.name").startsWith("Windows"))
         val dir = Files.createTempDirectory("ocr-auth-test-").toFile()

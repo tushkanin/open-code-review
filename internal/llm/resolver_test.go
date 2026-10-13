@@ -5,8 +5,10 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2913,5 +2915,90 @@ func TestResolveEndpointWithOptions_ConfigRequestTimeout(t *testing.T) {
 	}
 	if ep.Timeout != 60*time.Second {
 		t.Fatalf("ep.Timeout = %v, want config's 60s", ep.Timeout)
+	}
+}
+
+func TestNativeProviderResolution(t *testing.T) {
+	for _, name := range []string{"claude-code", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "helper-ran")
+			entry := providerEntryConfig{Model: "free-text-model", APIKeyCmd: "echo ran > " + marker}
+			cfg := configFile{Provider: name, Model: "global-model", Providers: map[string]providerEntryConfig{name: entry}}
+			ep, ok, err := tryProviderConfig(cfg, "")
+			if err != nil || !ok || ep.Model != "free-text-model" || !ep.AmbientAuth {
+				t.Fatalf("native resolution: %+v %v %v", ep, ok, err)
+			}
+			ep, _, err = tryProviderConfig(cfg, "flag-model")
+			if err != nil || ep.Model != "flag-model" {
+				t.Fatalf("flag precedence: %+v %v", ep, err)
+			}
+			entry.Protocol = ProtocolOpenAIChatCompletions
+			cfg.Providers[name] = entry
+			if _, _, err := tryProviderConfig(cfg, ""); err == nil || !strings.Contains(err.Error(), "requires a url") {
+				t.Fatalf("missing HTTP URL: %v", err)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("credential helper executes before URL validation: %v", err)
+			}
+			entry.URL = "http://localhost/v1"
+			entry.APIKey = "fixture-key"
+			entry.APIKeyCmd = ""
+			cfg.Providers[name] = entry
+			ep, _, err = tryProviderConfig(cfg, "")
+			if err != nil || ep.AmbientAuth || ep.Token != "fixture-key" || ep.URL != entry.URL {
+				t.Fatalf("HTTP override: %+v %v", ep, err)
+			}
+		})
+	}
+}
+
+func TestNativePresetHTTPOverrideCompletion(t *testing.T) {
+	clearAllEnv(t)
+	for _, name := range []string{"claude-code", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			var headers http.Header
+			var body map[string]any
+			server := newOpenAITestServer(&headers, &body)
+			defer server.Close()
+			path := filepath.Join(t.TempDir(), "config.json")
+			data := fmt.Sprintf(`{"provider":%q,"providers":{%q:{"protocol":"openai","url":%q,"api_key":"fixture-key","model":"custom-model"}}}`, name, name, server.URL+"/v1")
+			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := NewLLMClient(ep, nil, nil).CompletionsWithCtx(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "test"}}})
+			if err != nil || resp.Content() != "ok" {
+				t.Fatalf("HTTP completion: response=%+v err=%v", resp, err)
+			}
+			if headers.Get("Authorization") != "Bearer fixture-key" || body["model"] != "custom-model" {
+				t.Fatalf("HTTP override request: headers=%v body=%v", headers, body)
+			}
+		})
+	}
+}
+
+func TestNativeProtocolsRejectLegacyCredentials(t *testing.T) {
+	clearAllEnv(t)
+	for _, protocol := range []string{ProtocolClaudeCodeCLI, ProtocolCodexCLI} {
+		t.Run(protocol, func(t *testing.T) {
+			t.Setenv("OCR_LLM_URL", "http://localhost/v1")
+			t.Setenv("OCR_LLM_TOKEN", "fixture-key")
+			t.Setenv("OCR_LLM_MODEL", "fixture-model")
+			t.Setenv("OCR_LLM_PROTOCOL", protocol)
+			if _, _, err := tryOCREnv(""); err == nil || !strings.Contains(err.Error(), "configure a provider") {
+				t.Fatalf("legacy environment accepts native protocol: %v", err)
+			}
+			path := filepath.Join(t.TempDir(), "config.json")
+			data := fmt.Sprintf(`{"llm":{"url":"http://localhost/v1","auth_token_cmd":"exit 99","model":"fixture-model","protocol":%q}}`, protocol)
+			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := tryOCRConfig(path, ResolveOptions{}); err == nil || !strings.Contains(err.Error(), "configure a provider") {
+				t.Fatalf("legacy config accepts native protocol or executes its helper: %v", err)
+			}
+		})
 	}
 }

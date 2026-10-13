@@ -3,7 +3,27 @@
 `NewClaudeCodeClient` implements `LLMClient` through the installed `claude` executable on `PATH`.
 The adapter uses CLI-managed authentication.
 It does not use `ClientConfig.APIKey`, `URL`, credential helpers, HTTP retries, or HTTP raw capture.
-The provider registry and IDE interfaces do not select this adapter yet.
+Select `claude-code` or `codex` in `ocr config provider` or either IDE provider form.
+Both built-in providers use the normal OCR review workflow.
+
+```sh
+ocr config set providers.claude-code.model sonnet
+ocr config set provider claude-code
+ocr llm test
+```
+
+For Codex, set `providers.codex.model` to `gpt-6.1-sol` and select `codex`.
+Install and authenticate the native CLI before the connection check.
+OCR requires a model but no API key, credential helper, or HTTP URL for either native protocol.
+The model list contains suggestions. Users can save other model names.
+Native compatibility checks still validate the selected model.
+An HTTP protocol override requires its applicable URL and OCR credentials.
+The setup form follows the effective protocol and restores the API-key field for an HTTP override.
+Native provider selection does not copy another provider's saved API key.
+HTTP overrides retain the selected provider's saved key.
+Existing Official and Custom selections retain only that entry's saved key, including entries that use ambient authentication.
+Ambient protocols ignore that key and do not execute its credential helper.
+Configure a URL override with `ocr config set providers.<name>.url <url>`.
 
 ## Request and response
 
@@ -69,7 +89,6 @@ OCR_CLAUDE_SMOKE=1 OCR_CLAUDE_SMOKE_MODEL=sonnet \
 `NewCodexClient` implements the same contract through `codex exec`.
 The adapter supports codex-cli 0.162.1 only.
 Other releases return a compatibility error until their native controls receive a compatibility check.
-The provider registry, resolver, and IDE interfaces do not select this adapter yet.
 
 The adapter exports the bundled native catalog through `codex debug models --bundled`.
 The resolved model must match an exported identifier exactly.

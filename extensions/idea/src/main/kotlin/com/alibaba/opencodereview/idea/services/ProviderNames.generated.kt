@@ -10,6 +10,8 @@ internal fun generatedPresetProviderNames(): Set<String> = setOf(
     "anthropic",
     "baidu-qianfan",
     "bedrock",
+    "claude-code",
+    "codex",
     "dashscope",
     "dashscope-tokenplan",
     "deepseek",

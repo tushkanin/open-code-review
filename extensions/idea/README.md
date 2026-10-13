@@ -40,6 +40,31 @@ An IntelliJ IDEA plugin built on the [`open-code-review`](https://www.npmjs.com/
 
    The config is written to `~/.opencodereview/config.json`.
 
+### Native CLI providers
+
+Select **Claude Code CLI** or **Codex CLI** in the official provider form.
+Install and authenticate `claude` or `codex` through its native configuration.
+The native providers require a model but no OCR API key or HTTP URL.
+The form accepts custom model names and retains saved model choices.
+An HTTP protocol override restores the API-key field.
+Use `ocr config set providers.<name>.url <url>` for a saved URL override.
+Codex supports release `0.162.1` and requires an exact model from its bundled catalog.
+Its suggested model is `gpt-6.1-sol`. Claude's suggested model is `sonnet`.
+OCR controls review scope, prompts, rules, and tool execution.
+See [CLI compatibility and limits](../../internal/llm/CLI_COMPLETIONS.md) for native safety controls and the Codex configuration race limit.
+
+The integration smoke uses the actual OCR binary and both native providers:
+
+```bash
+OCR_INTEGRATION_BINARY=/absolute/path/to/ocr \
+  mise exec java@temurin-21 -- ./gradlew test -PskipFrontend=true --tests '*CliServiceAuthTest'
+```
+
+Set the test-only `OCR_INTEGRATION_PATH` when the shell selects an unsupported Codex release.
+The directory with the supported CLI must precede other CLI directories on that path.
+This smoke checks successful and failed drafts, saved configuration isolation, and temporary-home cleanup.
+The runtime proof uses POSIX. It does not establish Windows runtime behavior.
+
 ### Draft connection checks
 
 Draft checks use a temporary OCR home and leave the saved configuration unchanged.

@@ -45,10 +45,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 API-ключ. Если `providers.<name>.api_key` не задан, OCR использует
 соответствующую переменную окружения.
 
+Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP URL.
+
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `claude-code` | claude-code-cli | — | — (native CLI authentication) |
+| `codex` | codex-cli | — | — (native CLI authentication) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -147,10 +151,14 @@ Model:  claude-sonnet-5
 
 ### Пользовательские провайдеры
 
-Любое имя провайдера, которого нет в таблице выше, считается
-пользовательским. Для него необходимо задать как минимум `url` и `protocol`
-(`protocol` может принимать значения `anthropic`, `openai`,
-`openai-responses` или `anthropic-bedrock`):
+Любое имя провайдера, которого нет в таблице выше, считается пользовательским.
+Параметр `protocol` поддерживает `anthropic`, `openai`, `openai-responses`,
+`anthropic-bedrock`, `claude-code-cli` и `codex-cli`.
+Протоколы `anthropic`, `openai` и `openai-responses` требуют `url`.
+Записи с нативными протоколами `claude-code-cli` и `codex-cli` требуют модель.
+Они используют нативную аутентификацию CLI без `url`, `api_key` или `api_key_cmd` в OCR.
+
+Следующий пример использует HTTP-провайдер:
 
 ```bash
 ocr config set provider                             my-gateway
@@ -355,14 +363,12 @@ ocr review --max-tokens 400000
 ocr scan --max-tokens 120000
 ```
 
-Флаг для конкретного запуска имеет приоритет над `max_tokens`; если не задано
-ни то, ни другое, OCR использует встроенное значение по умолчанию из шаблона
-задачи. Этот лимит действует только на **промпт**: предел вывода модели задаётся
-отдельным параметром `MAX_COMPLETION_TOKENS` (по умолчанию `16384`), поэтому
-увеличение `max_tokens` не расширяет бюджет вывода. Он также не зависит от
-`--max-tokens-budget`, который ограничивает общее использование токенов за
-запуск. Чтобы восстановить встроенное значение по умолчанию, используйте
-`ocr config unset max_tokens`.
+Флаг для конкретного запуска имеет приоритет над `max_tokens`.
+Если оба значения отсутствуют, OCR использует встроенное значение по умолчанию из шаблона задачи.
+Лимит промпта не зависит от `MAX_COMPLETION_TOKENS` (`16384` в обоих шаблонах).
+Для нативного Codex OCR включает это значение в запись диалога как рекомендацию, а не как принудительный нативный предел выходных токенов.
+Лимит промпта также не зависит от `--max-tokens-budget`, который ограничивает общее использование токенов за запуск.
+Чтобы восстановить встроенное значение по умолчанию, используйте `ocr config unset max_tokens`.
 
 ### Предустановка усилий ревью (effort)
 
@@ -394,21 +400,25 @@ ocr llm test
 
 ### Использование CC-Switch
 
-Если вы используете [CC-Switch](https://github.com/farion1231/cc-switch) с
-включённой [службой маршрутизации](https://www.ccswitch.io/en/docs?section=proxy&item=service),
-укажите локальный прокси в качестве `url` провайдера — дополнительная настройка
-не требуется:
+Эта инструкция относится только к HTTP-провайдерам.
+Если вы включаете [службу маршрутизации](https://www.ccswitch.io/en/docs?section=proxy&item=service)
+в [CC-Switch](https://github.com/farion1231/cc-switch),
+укажите локальный прокси в качестве `url` HTTP-провайдера:
 
 ```bash
-# Claude (Anthropic-compatible)
+# HTTP-провайдер, совместимый с Anthropic
 ocr config set providers.anthropic.url http://127.0.0.1:15721
 
-# Codex / OpenAI-compatible — set that provider's url key instead
+# HTTP-провайдер, совместимый с OpenAI
 ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ```
 
-В `api_key` можно указать любое значение. `extra_body` (как и другие поля
-конкретного провайдера) продолжает применяться обычным образом.
+Для этих HTTP-провайдеров `api_key` может содержать любое значение, которое принимает прокси.
+Поля `extra_body` и другие поля HTTP-запроса также применяются.
+
+Нативный Codex использует собственную конфигурацию CLI для маршрутизации и аутентификации.
+Поля OCR `url`, `api_key` и `extra_body` не управляют нативными запросами Codex.
+Эта HTTP-инструкция применима к записи `codex`, только если запись явно выбирает HTTP-протокол, например `openai-responses`.
 
 ### Отправка полей, специфичных для поставщика
 

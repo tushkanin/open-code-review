@@ -7,6 +7,8 @@
 //   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
+//   - "claude-code-cli" — Claude Code CLI completions
+//   - "codex-cli" — Codex CLI completions
 package llm
 
 import (
@@ -467,6 +469,8 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol dispatch (canonical names from protocol.go):
 //   - ProtocolAnthropic ("anthropic") -> AnthropicClient
 //   - ProtocolOpenAIResponses ("openai-responses") -> OpenAIResponsesClient
+//   - ProtocolClaudeCodeCLI ("claude-code-cli") -> ClaudeCodeClient
+//   - ProtocolCodexCLI ("codex-cli") -> CodexClient
 //   - ProtocolOpenAIChatCompletions ("openai") or anything else -> OpenAIClient
 //
 // The defensive default keeps legacy callers that somehow bypass resolver
@@ -494,6 +498,10 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		AWSRegion:      ep.AWSRegion,
 	}
 	switch ep.Protocol {
+	case ProtocolClaudeCodeCLI:
+		return NewClaudeCodeClient(cfg)
+	case ProtocolCodexCLI:
+		return NewCodexClient(cfg)
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
 	case ProtocolAnthropicBedrock:

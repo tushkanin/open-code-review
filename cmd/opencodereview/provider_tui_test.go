@@ -4,8 +4,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -2771,6 +2773,8 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 		llm.ProtocolOpenAIChatCompletions,
 		llm.ProtocolOpenAIResponses,
 		llm.ProtocolAnthropicBedrock,
+		llm.ProtocolClaudeCodeCLI,
+		llm.ProtocolCodexCLI,
 	}
 	if len(cpProtocols) != len(want) {
 		t.Fatalf("cpProtocols has %d entries, want %d", len(cpProtocols), len(want))
@@ -2781,7 +2785,7 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 		}
 	}
 
-	wantManual := want[:len(want)-1]
+	wantManual := want[:3]
 	if len(manualProtocols) != len(wantManual) {
 		t.Fatalf("manualProtocols has %d entries, want %d", len(manualProtocols), len(wantManual))
 	}
@@ -2791,8 +2795,8 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 		}
 	}
 	for _, p := range manualProtocols {
-		if p == llm.ProtocolAnthropicBedrock {
-			t.Error("manualProtocols offers bedrock; the llm block has no region, profile or use for its url and token")
+		if llm.UsesAmbientAuth(p) {
+			t.Error("manualProtocols offers a native authentication protocol")
 		}
 	}
 }
@@ -3069,5 +3073,288 @@ func TestProviderTUI_ViewAPIKey_NoCmdHintWhenUnset(t *testing.T) {
 
 	if got := stripANSI(m.View().Content); strings.Contains(got, "api_key_cmd is set") {
 		t.Errorf("view should not claim api_key_cmd is set when it is not; got:\n%s", got)
+	}
+}
+
+func TestNativeWizardEffectiveProtocol(t *testing.T) {
+	for _, name := range []string{"claude-code", "codex"} {
+		for _, protocol := range []string{"", llm.ProtocolOpenAIChatCompletions} {
+			t.Run(name+"/"+protocol, func(t *testing.T) {
+				cfg := &Config{Provider: name, Providers: map[string]ProviderEntry{name: {Protocol: protocol}}}
+				m := newProviderTUI(cfg, "")
+				m.step = stepModel
+				next, _ := m.handleEnter()
+				got := next.(providerTUIModel)
+				if protocol == "" {
+					if !got.confirmed {
+						t.Fatal("native wizard requests credentials")
+					}
+					if !strings.Contains(stripANSI(m.View().Content), "Authentication uses the native CLI configuration.") {
+						t.Fatal("native guidance is absent")
+					}
+				} else if got.confirmed || got.step != stepAPIKey {
+					t.Fatal("HTTP override skips the API-key step")
+				}
+			})
+		}
+	}
+}
+
+func TestProviderTUI_HTTPToNativeCredentialIsolation(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	for _, name := range []string{"claude-code", "codex"} {
+		for _, protocol := range []string{"", llm.ProtocolOpenAIChatCompletions} {
+			t.Run(name+"/"+protocol, func(t *testing.T) {
+				httpEntry := ProviderEntry{APIKey: "http-secret", Model: "gpt-4o"}
+				model := "sonnet"
+				if name == "codex" {
+					model = "gpt-6.1-sol"
+				}
+				targetEntry := ProviderEntry{Model: model, Protocol: protocol}
+				if protocol != "" {
+					targetEntry.APIKey = "override-secret"
+					targetEntry.URL = "https://example.com/v1"
+				}
+				unrelatedEntry := ProviderEntry{APIKey: "unrelated-secret", Model: "other-model"}
+				customEntry := ProviderEntry{APIKey: "custom-secret", Model: "custom-model", Protocol: llm.ProtocolOpenAIChatCompletions, URL: "https://custom.example.com/v1"}
+				cfg := &Config{
+					Provider: "openai",
+					Model:    httpEntry.Model,
+					Language: "English",
+					Providers: map[string]ProviderEntry{
+						"openai":   httpEntry,
+						name:       targetEntry,
+						"deepseek": unrelatedEntry,
+					},
+					CustomProviders: map[string]ProviderEntry{"custom": customEntry},
+				}
+				configPath := filepath.Join(t.TempDir(), "config.json")
+				if err := saveConfig(configPath, cfg); err != nil {
+					t.Fatal(err)
+				}
+				cfg, err := loadOrCreateConfig(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				httpEntry = cfg.Providers["openai"]
+				targetEntry = cfg.Providers[name]
+				unrelatedEntry = cfg.Providers["deepseek"]
+				customEntry = cfg.CustomProviders["custom"]
+				m := newProviderTUI(cfg, configPath)
+				for moves := 0; m.currentProvider().Name != name; moves++ {
+					if moves >= len(m.providers) {
+						t.Fatalf("provider %q is absent", name)
+					}
+					next, _ := m.Update(downKey())
+					m = next.(providerTUIModel)
+				}
+				next, _ := m.Update(enterKey())
+				m = next.(providerTUIModel)
+				if m.step != stepModel {
+					t.Fatalf("step = %v, want model selection", m.step)
+				}
+				next, _ = m.Update(enterKey())
+				m = next.(providerTUIModel)
+				if protocol != "" {
+					if m.confirmed || m.step != stepAPIKey {
+						t.Fatal("HTTP override skips the API-key step")
+					}
+					next, _ = m.Update(enterKey())
+					m = next.(providerTUIModel)
+				}
+				if !m.confirmed {
+					t.Fatal("model confirmation does not finish the wizard")
+				}
+				if err := applyOfficialProviderConfig(configPath, cfg, m.result()); err != nil {
+					t.Fatal(err)
+				}
+				saved, err := loadOrCreateConfig(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if saved.Providers[name].APIKey != targetEntry.APIKey {
+					t.Errorf("saved target key = %q, want %q", saved.Providers[name].APIKey, targetEntry.APIKey)
+				}
+				if saved.Provider != name || saved.Model != targetEntry.Model || saved.Providers[name].Model != targetEntry.Model {
+					t.Errorf("saved provider/model = %q/%q/%q", saved.Provider, saved.Model, saved.Providers[name].Model)
+				}
+				if !reflect.DeepEqual(saved.Providers[name], targetEntry) {
+					t.Errorf("target entry = %#v, want %#v", saved.Providers[name], targetEntry)
+				}
+				if !reflect.DeepEqual(saved.Providers["openai"], httpEntry) ||
+					!reflect.DeepEqual(saved.Providers["deepseek"], unrelatedEntry) ||
+					!reflect.DeepEqual(saved.CustomProviders["custom"], customEntry) || saved.Language != "English" {
+					t.Fatal("provider setup changes unrelated configuration")
+				}
+			})
+		}
+	}
+}
+
+func TestProviderTUI_CustomCredentialIsolation(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	for _, protocol := range []string{llm.ProtocolClaudeCodeCLI, llm.ProtocolCodexCLI, llm.ProtocolAnthropicBedrock, llm.ProtocolOpenAIChatCompletions} {
+		for _, targetKey := range []string{"", "target-secret"} {
+			t.Run(protocol+"/"+targetKey, func(t *testing.T) {
+				target := ProviderEntry{
+					APIKey: targetKey, Model: "target-model", Models: []string{"target-model", "other-model"},
+					Protocol: protocol, APIKeyCmd: "target-helper", TimeoutSec: 37,
+				}
+				if !llm.UsesAmbientAuth(protocol) {
+					target.URL = "https://target.example.com/v1"
+					target.AuthHeader = "x-api-key"
+				}
+				source := ProviderEntry{APIKey: "http-secret", Model: "gpt-4o"}
+				boundary := ProviderEntry{
+					APIKey: "boundary-secret", Model: "boundary-model", Models: []string{"boundary-model"},
+					Protocol: llm.ProtocolOpenAIChatCompletions, URL: "https://boundary.example.com/v1",
+				}
+				cfg := &Config{
+					Provider: "openai", Model: source.Model, Language: "English",
+					Providers:       map[string]ProviderEntry{"openai": source, "deepseek": {APIKey: "unrelated-secret", Model: "unrelated-model"}},
+					CustomProviders: map[string]ProviderEntry{"target": target, "boundary": boundary},
+				}
+				configPath := filepath.Join(t.TempDir(), "config.json")
+				if err := saveConfig(configPath, cfg); err != nil {
+					t.Fatal(err)
+				}
+				baseline, err := loadOrCreateConfig(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg, err = loadOrCreateConfig(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				m := newProviderTUI(cfg, configPath)
+				send := func(key tea.KeyPressMsg) {
+					next, _ := m.Update(key)
+					m = next.(providerTUIModel)
+				}
+				send(rightKey())
+				for m.customProviders[m.customIdx].name != "boundary" {
+					send(downKey())
+				}
+				send(enterKey())
+				send(enterKey())
+				if m.step != stepAPIKey || m.apiKeyOriginal != boundary.APIKey {
+					t.Fatal("HTTP boundary does not load its own key")
+				}
+				send(escKey())
+				send(escKey())
+				for moves := 0; m.customProviders[m.customIdx].name != "target"; moves++ {
+					if moves >= len(m.customProviders) {
+						t.Fatal("target custom provider is absent")
+					}
+					send(downKey())
+				}
+				send(enterKey())
+				if m.step != stepModel {
+					t.Fatal("custom selection does not enter the model step")
+				}
+				send(enterKey())
+				if !llm.UsesAmbientAuth(protocol) {
+					if m.confirmed || m.step != stepAPIKey {
+						t.Fatal("custom HTTP selection skips the API-key step")
+					}
+					send(enterKey())
+				}
+				if !m.confirmed {
+					t.Fatal("custom model confirmation does not finish the wizard")
+				}
+				if err := applyCustomProviderConfig(configPath, cfg, m.result()); err != nil {
+					t.Fatal(err)
+				}
+				saved, err := loadOrCreateConfig(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(saved.CustomProviders["target"], baseline.CustomProviders["target"]) {
+					t.Errorf("saved target = %#v, want %#v", saved.CustomProviders["target"], baseline.CustomProviders["target"])
+				}
+				baseline.Provider = "target"
+				baseline.Model = target.Model
+				if !reflect.DeepEqual(saved, baseline) {
+					t.Error("custom provider selection changes configuration beyond the active provider and model")
+				}
+			})
+		}
+	}
+}
+
+func TestProviderTUI_OfficialAmbientOwnCredential(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	for _, name := range []string{"bedrock", "claude-code", "codex"} {
+		for _, targetKey := range []string{"", "target-secret"} {
+			for _, activeTarget := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/key=%t/active=%t", name, targetKey != "", activeTarget), func(t *testing.T) {
+					preset, _ := llm.LookupProvider(name)
+					target := ProviderEntry{
+						APIKey: targetKey, APIKeyCmd: "target-helper", Model: preset.Models[0],
+						Models: []string{preset.Models[0], "other-model"}, TimeoutSec: 37,
+					}
+					cfg := &Config{
+						Provider: "openai", Model: "gpt-4o", Language: "English",
+						Providers: map[string]ProviderEntry{
+							"openai": {APIKey: "http-secret", Model: "gpt-4o"},
+							name:     target, "deepseek": {APIKey: "unrelated-secret", Model: "other-model"},
+						},
+						CustomProviders: map[string]ProviderEntry{
+							"custom": {APIKey: "custom-secret", Model: "custom-model", Protocol: llm.ProtocolOpenAIChatCompletions, URL: "https://custom.example.com/v1"},
+						},
+					}
+					if activeTarget {
+						cfg.Provider = name
+						cfg.Model = target.Model
+					}
+					configPath := filepath.Join(t.TempDir(), "config.json")
+					if err := saveConfig(configPath, cfg); err != nil {
+						t.Fatal(err)
+					}
+					baseline, err := loadOrCreateConfig(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg, err = loadOrCreateConfig(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					m := newProviderTUI(cfg, configPath)
+					send := func(key tea.KeyPressMsg) {
+						next, _ := m.Update(key)
+						m = next.(providerTUIModel)
+					}
+					for moves := 0; m.currentProvider().Name != name; moves++ {
+						if moves >= len(m.providers) {
+							t.Fatalf("provider %q is absent", name)
+						}
+						send(downKey())
+					}
+					send(enterKey())
+					if m.step != stepModel {
+						t.Fatal("Official selection does not enter the model step")
+					}
+					send(enterKey())
+					if !m.confirmed || m.step == stepAPIKey {
+						t.Fatal("ambient model confirmation requires credential controls")
+					}
+					if err := applyOfficialProviderConfig(configPath, cfg, m.result()); err != nil {
+						t.Fatal(err)
+					}
+					saved, err := loadOrCreateConfig(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if saved.Providers[name].APIKey != targetKey {
+						t.Errorf("saved target key = %q, want %q", saved.Providers[name].APIKey, targetKey)
+					}
+					baseline.Provider = name
+					baseline.Model = target.Model
+					if !reflect.DeepEqual(saved, baseline) {
+						t.Error("Official ambient selection changes configuration beyond the active provider and model")
+					}
+				})
+			}
+		}
 	}
 }

@@ -27,18 +27,15 @@ type ResolvedEndpoint struct {
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
-	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
+	// Timeout is the request timeout; zero uses the client default of five minutes.
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
 
-	// AmbientAuth marks an endpoint that carries no token and needs no base
-	// URL, because the transport supplies both — AWS SigV4 signing derives the
-	// host from the region and the credentials from the environment's own
-	// chain. Completeness checks must treat an empty URL and Token as valid for
-	// these; requiring either would reject a correctly configured endpoint.
+	// AmbientAuth identifies endpoints that use AWS or native CLI authentication.
+	// These endpoints require neither an OCR token nor an HTTP URL.
 	AmbientAuth bool
 
 	// AWSProfile and AWSRegion override the ambient AWS chain for SigV4
@@ -289,6 +286,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
 		}
+		if IsCLIProtocol(protocol) {
+			return ResolvedEndpoint{}, false, fmt.Errorf("%s cannot use %q; configure a provider instead", envOCRLLMProtocol, protocol)
+		}
 	}
 	if protocol == "" {
 		useAnthropic := true // default true
@@ -473,11 +473,8 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 			protocol = normalized
 		}
 	} else {
-		// Custom provider: protocol is always required; model can come from
-		// cfg.Model. url is required for every protocol that names an HTTP
-		// endpoint, which is all of them except bedrock — there the region
-		// decides the host, so demanding a url would mean storing a value the
-		// client never reads.
+		// Native transports derive their endpoint and authentication from their
+		// own configuration.
 		if entry.Protocol == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a protocol field", cfg.Provider)
 		}
@@ -485,28 +482,17 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
 		}
-		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
+		if !UsesAmbientAuth(normalized) && entry.URL == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
 		}
 		url = entry.URL
 		protocol = normalized
 	}
 
-	// Ambient auth follows the protocol actually in force, which is why this is
-	// resolved after the override above rather than read off the preset. A preset
-	// declares ambient auth (AmbientAuth), but an entry may override the preset's
-	// protocol: a bedrock preset switched to "openai" speaks a protocol with no
-	// SigV4 signing and needs a token like anything else. Conversely an entry
-	// that selects the bedrock protocol explicitly signs its requests whatever
-	// the preset says.
-	ambientAuth := protocol == ProtocolAnthropicBedrock ||
-		(isPreset && preset.AmbientAuth && entry.Protocol == "")
-
-	// No credential at all is an error, and it is reported before api_key_cmd
-	// runs: only the command's *execution* is deferred, not the emptiness check.
-	// An ambient-auth provider is the exception — it has no key to configure,
-	// since credentials come from the environment's own chain and the request is
-	// signed rather than bearing a token.
+	ambientAuth := UsesAmbientAuth(protocol)
+	if !ambientAuth && strings.TrimSpace(url) == "" {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q requires a url field for protocol %q", cfg.Provider, protocol)
+	}
 	if apiKey == "" && apiKeyCmd == "" && !ambientAuth {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
@@ -658,6 +644,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
+		}
+		if IsCLIProtocol(protocol) {
+			return ResolvedEndpoint{}, false, fmt.Errorf("llm.protocol cannot use %q; configure a provider instead", protocol)
 		}
 	}
 	if protocol == "" {

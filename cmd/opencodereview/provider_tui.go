@@ -63,6 +63,8 @@ var cpProtocols = []string{
 	llm.ProtocolOpenAIChatCompletions,
 	llm.ProtocolOpenAIResponses,
 	llm.ProtocolAnthropicBedrock,
+	llm.ProtocolClaudeCodeCLI,
+	llm.ProtocolCodexCLI,
 }
 
 // manualProtocols lists the protocol options offered in the Manual form, which
@@ -199,7 +201,7 @@ type providerTUIModel struct {
 // ends at the protocol step instead of walking three fields that would be
 // written as dead config.
 func (m providerTUIModel) cpAmbientProtocol() bool {
-	return cpProtocols[m.cpProtocolIdx] == llm.ProtocolAnthropicBedrock
+	return llm.UsesAmbientAuth(cpProtocols[m.cpProtocolIdx])
 }
 
 func cpProtocolIndex(protocol string) int {
@@ -416,7 +418,14 @@ func (m providerTUIModel) currentProvider() llm.Provider {
 	if m.activeTab != tabOfficial || m.officialIdx >= len(m.providers) {
 		return llm.Provider{}
 	}
-	return m.providers[m.officialIdx]
+	p := m.providers[m.officialIdx]
+	if m.existingCfg != nil {
+		if protocol := m.existingCfg.Providers[p.Name].Protocol; protocol != "" {
+			p.Protocol = llm.NormalizeProtocol(protocol)
+		}
+	}
+	p.AmbientAuth = llm.UsesAmbientAuth(p.Protocol)
+	return p
 }
 
 func (m providerTUIModel) selectedCustomProvider() (customProviderListItem, bool) {
@@ -1009,6 +1018,9 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 		return false, officialAPIKeyRequiredError(p)
 	}
 	if cp, ok := m.selectedCustomProvider(); ok && cp.name != "" {
+		if llm.UsesAmbientAuth(llm.NormalizeProtocol(cp.entry.Protocol)) {
+			return true, ""
+		}
 		return false, fmt.Sprintf("API key is required (configure it or set custom_providers.%s.api_key_cmd)", cp.name)
 	}
 	return false, "API key is required"
@@ -1253,7 +1265,7 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		AuthHeader: r.authHeader,
 		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
 	}
-	if r.protocol == llm.ProtocolAnthropicBedrock {
+	if llm.UsesAmbientAuth(r.protocol) {
 		entry.APIKey = ""
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
@@ -1384,7 +1396,7 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	}
 	// Switching an entry to an ambient protocol drops the key it no longer uses,
 	// rather than leaving a live credential in a file nothing reads it from.
-	if entry.Protocol == llm.ProtocolAnthropicBedrock {
+	if llm.UsesAmbientAuth(entry.Protocol) {
 		entry.APIKey = ""
 	}
 	// If name changed, delete old key
@@ -1824,6 +1836,7 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 	case stepProvider:
 		switch m.activeTab {
 		case tabOfficial:
+			m.loadExistingAPIKey()
 			m.step = stepModel
 			currentModel := ""
 			if m.existingCfg != nil {
@@ -1849,6 +1862,7 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 				return m, m.cpNameInput.Focus()
 			}
 			cp := m.customProviders[m.customIdx]
+			m.loadExistingAPIKey()
 			m.step = stepModel
 			entry := m.customProviderEntry(cp.name, cp.entry)
 			m.prepareModelSelection(cp.name, activeModelForProvider(m.existingCfg, cp.name, entry))
@@ -1869,10 +1883,11 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
-			// An ambient-auth provider has no key to collect, so the model step
-			// is the last one. Showing an API-key prompt that must be left blank
-			// would read as a step the user failed to complete.
+		ambientAuth := m.activeTab == tabOfficial && m.currentProvider().AmbientAuth
+		if cp, ok := m.selectedCustomProvider(); ok {
+			ambientAuth = llm.UsesAmbientAuth(llm.NormalizeProtocol(cp.entry.Protocol))
+		}
+		if ambientAuth {
 			m.formError = ""
 			m.confirmed = true
 			return m, tea.Quit
@@ -2288,7 +2303,11 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 					}
 				}
 				if m.cpAmbientProtocol() {
-					s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+m.cpNameInput.Value()+".aws_region <r>`") + "\n")
+					if llm.IsCLIProtocol(cpProtocols[m.cpProtocolIdx]) {
+						s.WriteString(tuiDimStyle.Render("    Authentication uses the native CLI configuration.") + "\n")
+					} else {
+						s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+m.cpNameInput.Value()+".aws_region <r>`") + "\n")
+					}
 				}
 			case cpStepBaseURL:
 				s.WriteString("    " + m.cpURLInput.View() + "\n")
@@ -2406,6 +2425,9 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 func (m providerTUIModel) viewModel(s *strings.Builder) {
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.modelProviderName())))
 	s.WriteString("\n\n")
+	if m.activeTab == tabOfficial && llm.IsCLIProtocol(m.currentProvider().Protocol) {
+		s.WriteString(tuiDimStyle.Render("  Authentication uses the native CLI configuration.") + "\n\n")
+	}
 
 	models := m.models()
 
@@ -2497,7 +2519,7 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 			hasSavedKey := m.apiKeyMasked && m.apiKeyOriginal != ""
 			s.WriteString(tuiDimStyle.Render(officialAPIKeyEnvSetHintLine(provider.EnvVar, hasSavedKey)))
 			s.WriteString("\n")
-		} else {
+		} else if provider.EnvVar != "" {
 			s.WriteString("\n")
 			s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Tip: You can also set via env var %s", provider.EnvVar)))
 			s.WriteString("\n")

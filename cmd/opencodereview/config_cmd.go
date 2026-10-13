@@ -793,7 +793,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses, claude-code-cli, codex-cli\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -905,13 +905,13 @@ func parseTimeoutSeconds(value string) (int, error) {
 // The entry's own protocol decides whenever it sets one: a preset's protocol can
 // be overridden per entry (see tryProviderConfig), so `protocol: openai` on the
 // bedrock preset would otherwise still accept AWS settings that nothing reads.
-// Only when the entry is silent does the preset's own AmbientAuth flag answer.
+// The preset protocol decides when the entry has no override.
 func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
 	if entry.Protocol != "" {
 		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
 	}
 	preset, isPreset := llm.LookupProvider(providerName)
-	return isPreset && preset.AmbientAuth
+	return isPreset && preset.Protocol == llm.ProtocolAnthropicBedrock
 }
 
 // normalizeAWSSetting trims the value and rejects the shapes AWS itself will

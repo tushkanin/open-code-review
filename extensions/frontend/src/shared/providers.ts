@@ -9,7 +9,7 @@ export { PROVIDER_PRESETS };
 export interface OcrProviderPreset {
   name: string;
   displayName: string;
-  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'anthropic-bedrock';
+  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'anthropic-bedrock' | 'claude-code-cli' | 'codex-cli';
   baseUrl: string;
   authHeader?: string;
   envVar: string;
@@ -28,9 +28,12 @@ export function isPresetProvider(name: string): boolean {
 }
 
 export function usesAmbientAuth(preset: OcrProviderPreset, protocolOverride?: string): boolean {
-  const protocol = protocolOverride?.trim().toLowerCase();
-  if (protocol) return protocol === 'anthropic-bedrock';
-  return preset.protocol === 'anthropic-bedrock' || preset.ambientAuth === true;
+  const protocol = protocolOverride?.trim().toLowerCase() || preset.protocol;
+  return protocol === 'anthropic-bedrock' || isCLIProtocol(protocol);
+}
+
+export function isCLIProtocol(protocol: string): boolean {
+  return protocol === 'claude-code-cli' || protocol === 'codex-cli';
 }
 
 export function mergeModelLists(...lists: string[][]): string[] {

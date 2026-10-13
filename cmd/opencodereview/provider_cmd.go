@@ -237,15 +237,13 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 // command as unset, so without this a command of "   " would satisfy the check
 // here and then fail resolution with "no api_key or api_key_cmd configured".
 //
-// An ambient-auth provider has no credential to save at all: demanding one would
-// make it impossible to configure, since the credentials live in the AWS chain
-// rather than the config file.
+// Ambient protocols use native authentication instead of an OCR credential.
 func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
 	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
 		return nil
 	}
 	switch {
-	case isPreset && preset.AmbientAuth:
+	case llm.UsesAmbientAuth(preset.Protocol):
 		return nil
 	case isPreset && preset.EnvVar != "":
 		if os.Getenv(preset.EnvVar) == "" {
@@ -267,6 +265,9 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	}
 
 	preset, isPreset := llm.LookupProvider(result.provider)
+	if protocol := cfg.Providers[result.provider].Protocol; protocol != "" {
+		preset.Protocol = llm.NormalizeProtocol(protocol)
+	}
 
 	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
 		return err

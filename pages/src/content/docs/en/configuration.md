@@ -42,10 +42,14 @@ preset — once selected, you only need to fill in the API key. If
 `providers.<name>.api_key` is unset, OCR falls back to the corresponding
 environment variable.
 
+Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP URL.
+
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
+| `claude-code` | claude-code-cli | — | — (native CLI authentication) |
+| `codex` | codex-cli | — | — (native CLI authentication) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -142,9 +146,14 @@ rather than accepted and ignored.
 
 ### Custom providers
 
-Any provider name not in the table above is treated as custom and must
-supply at least `url` and `protocol` (`protocol` is `anthropic`,
-`openai`, `openai-responses`, or `anthropic-bedrock`):
+Any provider name not in the table above is custom. Set its `protocol` to
+`anthropic`, `openai`, `openai-responses`, `anthropic-bedrock`,
+`claude-code-cli`, or `codex-cli`.
+The `anthropic`, `openai`, and `openai-responses` protocols require a `url`.
+Native `claude-code-cli` and `codex-cli` entries require a model.
+They use native CLI authentication without an OCR `url`, `api_key`, or `api_key_cmd`.
+
+The following example uses an HTTP provider:
 
 ```bash
 ocr config set provider                             my-gateway
@@ -337,10 +346,11 @@ ocr review --max-tokens 400000
 ocr scan --max-tokens 400000
 ```
 
-The per-run flag takes precedence over `max_tokens`; when neither is set, OCR
-uses the embedded task-template default. The limit is independent of the
-model's **output** cap (`MAX_COMPLETION_TOKENS`, `16384` in both templates)
-and of `--max-tokens-budget`, which caps total token use for a whole run.
+The per-run flag takes precedence over `max_tokens`.
+When neither is set, OCR uses the embedded task-template default.
+The prompt limit is independent of `MAX_COMPLETION_TOKENS` (`16384` in both templates).
+For native Codex, OCR includes this value as guidance in the transcript, not as an enforced native output-token cap.
+The prompt limit is also independent of `--max-tokens-budget`, which caps total token use for a whole run.
 Restore the embedded default with `ocr config unset max_tokens`.
 
 ### Review effort
@@ -370,21 +380,25 @@ config file needed.
 
 ### Using CC-Switch
 
-If you use [CC-Switch](https://github.com/farion1231/cc-switch) with its
-[routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service)
-enabled, point the provider `url` at the local proxy — no other setup is
-required:
+This recipe applies only to HTTP providers.
+If you enable the [CC-Switch](https://github.com/farion1231/cc-switch)
+[routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service),
+set the HTTP provider's `url` to the local proxy:
 
 ```bash
-# Claude (Anthropic-compatible)
+# Anthropic-compatible HTTP provider
 ocr config set providers.anthropic.url http://127.0.0.1:15721
 
-# Codex / OpenAI-compatible — set that provider's url key instead
+# OpenAI-compatible HTTP provider
 ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ```
 
-`api_key` can be any value. `extra_body` (and other per-provider fields)
-still apply as usual.
+For these HTTP providers, `api_key` can be any value that the proxy accepts.
+`extra_body` and other HTTP request fields still apply.
+
+Native Codex uses its CLI configuration for routing and authentication.
+OCR's `url`, `api_key`, and `extra_body` do not control native Codex requests.
+This HTTP recipe applies to a `codex` entry only if that entry explicitly selects an HTTP protocol, such as `openai-responses`.
 
 ### Send vendor-specific fields
 

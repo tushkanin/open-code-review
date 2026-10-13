@@ -39,10 +39,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 下列 provider 随 OCR 发布，已预置 Base URL 与协议，选中后只需填 API key。
 若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。
 
+Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP URL.
+
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `claude-code` | claude-code-cli | — | — (native CLI authentication) |
+| `codex` | codex-cli | — | — (native CLI authentication) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -131,9 +135,14 @@ URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个�
 
 ### 自定义 provider
 
-任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
-（`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
-`anthropic-bedrock`）：
+任何不在上表中的 provider 名都视为自定义。
+`protocol` 支持 `anthropic`、`openai`、`openai-responses`、
+`anthropic-bedrock`、`claude-code-cli` 和 `codex-cli`。
+`anthropic`、`openai` 和 `openai-responses` 协议要求提供 `url`。
+原生 `claude-code-cli` 和 `codex-cli` 条目要求指定模型。
+它们使用原生 CLI 认证，不需要 OCR 的 `url`、`api_key` 或 `api_key_cmd`。
+
+以下示例使用 HTTP provider。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -307,11 +316,12 @@ ocr review --max-tokens 400000
 ocr scan --max-tokens 120000
 ```
 
-单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
-的默认值。该上限只约束**提示词**：模型的输出上限由单独的
-`MAX_COMPLETION_TOKENS`（默认 `16384`）控制，因此调高 `max_tokens` 不会连带放大
-输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
-可以用 `ocr config unset max_tokens` 恢复为内置默认值。
+单次运行的参数优先级高于 `max_tokens`。
+如果两者都未设置，OCR 会使用内置任务模板的默认值。
+提示词上限与 `MAX_COMPLETION_TOKENS`（两个模板均为 `16384`）相互独立。
+对于原生 Codex，OCR 将该值作为指导信息放入对话记录，不会强制执行原生输出 token 上限。
+提示词上限也与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
+可以用 `ocr config unset max_tokens` 恢复内置默认值。
 
 ### 评审投入档位（effort）
 
@@ -338,19 +348,25 @@ ocr llm test
 
 ### 使用 CC-Switch
 
+以下配置方法仅适用于 HTTP provider。
 如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了
 [路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，
-可以将供应商的 `url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
+可以将 HTTP provider 的 `url` 设为本地代理地址：
 
 ```bash
-# Claude（Anthropic 兼容）
+# Anthropic 兼容的 HTTP provider
 ocr config set providers.anthropic.url http://127.0.0.1:15721
 
-# Codex / OpenAI 兼容 — 将该供应商的 url 键设为代理地址
+# OpenAI 兼容的 HTTP provider
 ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ```
 
-`api_key` 可设置为任意值。`extra_body`（及其他按供应商字段）依然生效。
+对于这些 HTTP provider，`api_key` 可以使用代理接受的任意值。
+`extra_body` 和其他 HTTP 请求字段仍然生效。
+
+原生 Codex 使用自身的 CLI 配置来决定路由和认证。
+OCR 的 `url`、`api_key` 和 `extra_body` 不控制原生 Codex 请求。
+只有当 `codex` 条目明确选择 HTTP 协议（如 `openai-responses`）时，才能使用上述 HTTP 配置方法。
 
 ### 发送厂商专属字段
 
