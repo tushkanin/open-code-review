@@ -5,6 +5,7 @@ package rules
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1617,7 +1618,7 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 // ── project-layer confinement tests ──
 
 // canonicalRoot returns the canonical (symlink-resolved) form of dir, mirroring
-// loadProjectRule's pathutil.CanonicalPath call.
+// loadProjectRuleAt's pathutil.CanonicalPath call.
 func canonicalRoot(t *testing.T, dir string) string {
 	t.Helper()
 	root, err := pathutil.CanonicalPath(dir)
@@ -1718,10 +1719,9 @@ func TestReadRuleFileSafe_ConfineRejectsOutside(t *testing.T) {
 	}
 }
 
-// TestLoadProjectRule_ConfinesUntrustedReferences exercises the real entry point: a
-// malicious .opencodereview/rule.json referencing an absolute path outside the repo
-// must not leak that file's contents into the resolved rule.
-func TestLoadProjectRule_ConfinesUntrustedReferences(t *testing.T) {
+// Project configs must not expose files outside their containing directory.
+func TestLoadProjectRules_ConfinesUntrustedReferences(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(outside, []byte("AWS_KEY=AKIA-SECRET\n"), 0o644); err != nil {
@@ -1742,22 +1742,21 @@ func TestLoadProjectRule_ConfinesUntrustedReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pr, err := loadProjectRule(repoDir)
+	pr, err := loadProjectRules(repoDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pr == nil || len(pr.Rules) != 1 {
-		t.Fatalf("expected one project rule, got %+v", pr)
+	if len(pr) != 1 || len(pr[0].Rules) != 1 {
+		t.Fatalf("expected one project config with one rule, got %+v", pr)
 	}
-	if pr.Rules[0].Rule != "" {
-		t.Errorf("untrusted absolute reference must be cleared, got %q", pr.Rules[0].Rule)
+	if pr[0].Rules[0].Rule != "" {
+		t.Errorf("untrusted absolute reference must be cleared, got %q", pr[0].Rules[0].Rule)
 	}
 }
 
-// TestLoadProjectRule_RejectsSymlinkedDir verifies that an attacker-committed
-// ".opencodereview" directory symlink pointing outside the repo cannot make
-// loadProjectRule read a rule file from outside the repository.
-func TestLoadProjectRule_RejectsSymlinkedDir(t *testing.T) {
+// A config directory symlink must not escape its containing directory.
+func TestLoadProjectRules_RejectsSymlinkedDir(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	outsideDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outsideDir, "rule.json"), []byte(`{"rules":[{"path":"**/*.go","rule":"OUTSIDE"}]}`), 0o644); err != nil {
@@ -1767,18 +1766,18 @@ func TestLoadProjectRule_RejectsSymlinkedDir(t *testing.T) {
 		t.Skipf("cannot create symlink: %v", err)
 	}
 
-	pr, err := loadProjectRule(repoDir)
+	pr, err := loadProjectRules(repoDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pr != nil {
+	if len(pr) != 0 {
 		t.Errorf("symlinked .opencodereview dir outside repo must be skipped, got %+v", pr)
 	}
 }
 
-// TestLoadProjectRule_RejectsSymlinkedRuleFile verifies that a symlinked "rule.json"
-// pointing outside the repo cannot be read.
-func TestLoadProjectRule_RejectsSymlinkedRuleFile(t *testing.T) {
+// A config file symlink must not escape its containing directory.
+func TestLoadProjectRules_RejectsSymlinkedRuleFile(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	cfgDir := filepath.Join(repoDir, ".opencodereview")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
@@ -1792,12 +1791,119 @@ func TestLoadProjectRule_RejectsSymlinkedRuleFile(t *testing.T) {
 		t.Skipf("cannot create symlink: %v", err)
 	}
 
-	pr, err := loadProjectRule(repoDir)
+	pr, err := loadProjectRules(repoDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pr != nil {
+	if len(pr) != 0 {
 		t.Errorf("symlinked rule.json outside repo must be skipped, got %+v", pr)
+	}
+}
+
+func TestNewResolver_ParentDiscovery(t *testing.T) {
+	for _, depth := range []int{0, 1, 3} {
+		t.Run(fmt.Sprintf("depth_%d", depth), func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			base := t.TempDir()
+			repoDir := base
+			for range depth {
+				repoDir = filepath.Join(repoDir, "nested")
+			}
+			if err := os.MkdirAll(repoDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			configDir := filepath.Join(base, ".opencodereview")
+			if err := os.MkdirAll(configDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(base, "shared.md"), []byte("Check shared policy\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			config := `{"exclude":["**/generated/**"],"rules":[{"path":"**/*.go","rule":"shared.md"}]}`
+			if err := os.WriteFile(filepath.Join(configDir, "rule.json"), []byte(config), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			resolver, filter, err := NewResolver(repoDir, "", ResolverOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			detail := resolver.(DetailResolver).ResolveDetail("src/main.go")
+			if detail.Rule != "Check shared policy" || detail.Source != "project" {
+				t.Fatalf("unexpected rule: %+v", detail)
+			}
+			if !filter.IsUserExcluded("src/generated/main.go") {
+				t.Fatal("parent exclude pattern does not apply")
+			}
+		})
+	}
+}
+
+func TestNewResolver_NearestProjectConfigWins(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	writeConfig := func(dir, content string) {
+		t.Helper()
+		configDir := filepath.Join(dir, ".opencodereview")
+		if err := os.MkdirAll(configDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "rule.json"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConfig(base, `{"exclude":["**/*.go"],"rules":[{"path":"**/*","rule":"Parent policy"}]}`)
+	writeConfig(repoDir, `{"rules":[{"path":"**/*.go","rule":"Local policy"}]}`)
+
+	resolver, filter, err := NewResolver(repoDir, "", ResolverOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolver.Resolve("main.go"); got != "Local policy" {
+		t.Fatalf("local policy loses priority: %q", got)
+	}
+	if got := resolver.(DetailResolver).ResolveDetail("main.py"); got.Source != "system" {
+		t.Fatalf("unmatched paths must not inherit a farther config: %+v", got)
+	}
+	if filter != nil && filter.IsUserExcluded("main.go") {
+		t.Fatal("farther config must not supply filters")
+	}
+
+	writeConfig(repoDir, `{}`)
+	resolver, _, err = NewResolver(repoDir, "", ResolverOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolver.(DetailResolver).ResolveDetail("main.go"); got.Source != "system" {
+		t.Fatalf("empty local config must stop parent discovery: %+v", got)
+	}
+}
+
+func TestLoadProjectRules_ParentErrors(t *testing.T) {
+	for _, directory := range []bool{false, true} {
+		t.Run(fmt.Sprintf("directory_%t", directory), func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			base := t.TempDir()
+			repoDir := filepath.Join(base, "repo")
+			configDir := filepath.Join(base, ".opencodereview")
+			for _, dir := range []string{repoDir, configDir} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(configDir, "rule.json")
+			if directory {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("{invalid"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadProjectRules(repoDir); err == nil {
+				t.Fatal("invalid parent config must return an error")
+			}
+		})
 	}
 }
 
