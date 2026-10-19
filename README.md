@@ -137,6 +137,20 @@ For CLI setup, environment variables, custom providers, and other advanced confi
 
 **2. Review**
 
+OCR-managed diff reviews use fixed repository evidence for each run.
+Range and commit reviews use resolved commits.
+OCR-managed diff reviews ignore Git replacement refs during capture and later evidence access.
+Workspace reviews capture local changes, including context outside the selected files.
+Later file edits or branch changes do not change built-in file reads, searches, file lookup, or captured diff reads.
+Search uses captured Git attributes and diff driver settings to classify text and binary content.
+Search also preserves Git's `diff.<driver>.binary=auto` setting.
+Attribute pathspecs use the captured attribute states, including values and exclusions.
+Search commands share the existing Git process limit.
+
+The staged fallback uses index content when it supplies the reviewed diff.
+Unavailable or inconsistent content remains unavailable instead of using an older version.
+Full-file scans and host-managed delegation keep their current behavior.
+
 ```bash
 cd your-project
 

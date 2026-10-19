@@ -56,7 +56,14 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 
 	// 1. First pass: match against base filename (maintains precision for pure filename queries).
 	var matched []string
+	maxCount := fileFindMaxCount
+	if p.FileReader.Evidence != nil {
+		maxCount++
+	}
 	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		base := f
 		if idx := strings.LastIndex(f, "/"); idx != -1 {
 			base = f[idx+1:]
@@ -68,7 +75,7 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 		if strings.Contains(baseCmp, queryCmp) {
 			matched = append(matched, f)
 		}
-		if len(matched) >= fileFindMaxCount {
+		if len(matched) >= maxCount {
 			break
 		}
 	}
@@ -77,6 +84,9 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 	// (enables directory-scoped queries such as `pkg/util` or `internal/diff`).
 	if len(matched) == 0 {
 		for _, f := range files {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 			pathCmp := f
 			if !caseSensitive {
 				pathCmp = strings.ToLower(f)
@@ -84,7 +94,7 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 			if strings.Contains(pathCmp, queryCmp) {
 				matched = append(matched, f)
 			}
-			if len(matched) >= fileFindMaxCount {
+			if len(matched) >= maxCount {
 				break
 			}
 		}
@@ -92,6 +102,9 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 
 	if len(matched) == 0 {
 		return "// The file was not found", nil
+	}
+	if len(matched) > fileFindMaxCount {
+		return "Note: Results truncated to the first 100 files. Coverage is limited.\n" + strings.Join(matched[:fileFindMaxCount], "\n"), nil
 	}
 	return strings.Join(matched, "\n"), nil
 }
@@ -102,6 +115,19 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	ctx, cancel := context.WithTimeout(parentCtx, fileFindTimeout)
 	defer cancel()
 
+	if p.FileReader.Evidence != nil {
+		names, err := p.FileReader.Evidence.Paths(ctx)
+		if err != nil {
+			return nil, err
+		}
+		files := names[:0]
+		for _, name := range names {
+			if !shouldSkipFile(name) {
+				files = append(files, name)
+			}
+		}
+		return files, nil
+	}
 	var output []byte
 	var err error
 

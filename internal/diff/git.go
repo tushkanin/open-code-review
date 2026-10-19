@@ -62,6 +62,14 @@ type Provider struct {
 	commit string // single commit hash/ref
 
 	mergeBase string // cached common ancestor for range mode
+
+	evidence             *EvidenceView
+	input                *InputResolution
+	workspaceIndex       bool
+	capturedSet          *DiffSet
+	resolutionError      error
+	resolutionDiagnostic string
+	useReplacementRefs   bool
 }
 
 // DiffSet separates the diffs a review may process from files excluded by the
@@ -126,6 +134,12 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 	}
 }
 
+// UseGitReplacements selects ordinary Git semantics before the first input query.
+// Host-managed previews must agree with the host's later Git commands.
+func (p *Provider) UseGitReplacements() {
+	p.useReplacementRefs = true
+}
+
 // InputResolution carries this run's frozen, immutable commit endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
 // resolvable" — a root commit and a merge commit have no single comparison base,
@@ -156,10 +170,13 @@ type InputResolution struct {
 // It runs read-only git queries and never returns an error: an unresolvable
 // endpoint is reported as an empty field, never a fabricated SHA.
 func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
+	if p.input != nil {
+		return *p.input
+	}
 	switch p.mode {
 	case ModeRange:
-		base := p.MergeBase(ctx)
 		head := p.resolveCommit(ctx, p.to)
+		base := p.computeMergeBase(ctx, p.from, head)
 		r := InputResolution{ResolvedBase: base, ResolvedHead: head}
 		if base != "" && head != "" {
 			r.ExactRange = base + ".." + head
@@ -168,9 +185,7 @@ func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 	case ModeCommit:
 		head := p.resolveCommit(ctx, p.commit)
 		r := InputResolution{ResolvedHead: head}
-		if parents := p.commitParents(ctx, p.commit); len(parents) > 0 && head != "" {
-			// GetDiff renders merge commits against their first parent, so the
-			// manifest must record that same concrete comparison base.
+		if parents := p.commitParents(ctx, head); len(parents) > 0 && head != "" {
 			r.ResolvedBase = parents[0]
 			r.ExactRange = parents[0] + ".." + head
 		}
@@ -216,26 +231,37 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 // built-in directory rules. It preserves GetDiff's filtering behavior while
 // allowing callers that report the whole Git changeset to show those exclusions.
 func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
+	if err := ctx.Err(); err != nil {
+		return DiffSet{}, err
+	}
+	if p.capturedSet != nil {
+		return *p.capturedSet, nil
+	}
 	var combined strings.Builder
+	input := p.ResolveInput(ctx)
+	p.input = &input
 
 	switch p.mode {
 	case ModeRange:
-		base := p.MergeBase(ctx)
+		base := input.ResolvedBase
 		if base == "" {
 			return DiffSet{}, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
 		}
-		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
+		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--full-index", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, input.ResolvedHead, "--")
 		if err != nil {
 			return DiffSet{}, gitFailure("git diff", stderr, err)
 		}
 		combined.WriteString(out)
 
 	case ModeCommit:
+		if input.ResolvedHead == "" {
+			return DiffSet{}, gitFailure("git show", p.resolutionDiagnostic+"\ncannot resolve commit "+p.commit, p.resolutionError)
+		}
 		// --diff-merges=first-parent: for merge commits, plain `git show`
 		// emits a combined diff ("diff --cc"), which ParseDiffText cannot
 		// parse — the commit would silently yield zero reviewable diffs.
 		// Diffs against the first parent instead, in regular unified format.
-		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
+		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "show", "--full-index", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", input.ResolvedHead)
 		if err != nil {
 			return DiffSet{}, gitFailure("git show", stderr, err)
 		}
@@ -254,6 +280,12 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		}
 		combined.WriteString(tracked)
 
+		view, err := p.newEvidence(ctx, input, p.workspaceIndex)
+		if err != nil {
+			return DiffSet{}, err
+		}
+		p.evidence = view
+
 		untracked, err := p.untrackedFileDiffs(ctx)
 		if err != nil {
 			return DiffSet{}, fmt.Errorf("untracked file diff failed: %w", err)
@@ -264,19 +296,27 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		}
 	}
 
-	var ref string
-	switch p.mode {
-	case ModeRange:
-		ref = p.to
-	case ModeCommit:
-		ref = p.commit
+	if p.evidence == nil {
+		view, err := p.newEvidence(ctx, input, false)
+		if err != nil {
+			return DiffSet{}, err
+		}
+		p.evidence = view
 	}
-
-	diffs, err := ParseDiffText(ctx, combined.String(), p.repoDir, ref, p.runner)
+	diffs, err := parseDiffText(ctx, combined.String(), p.repoDir, input.ResolvedHead, p.runner, p.evidence.fileContent)
 	if err != nil {
 		return DiffSet{}, err
 	}
-	return p.partitionDiffs(diffs), nil
+	p.evidence.reconcile(ctx, diffs, combined.String())
+	if err := p.evidence.seal(ctx); err != nil {
+		return DiffSet{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return DiffSet{}, err
+	}
+	set := p.partitionDiffs(diffs)
+	p.capturedSet = &set
+	return set, nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -578,8 +618,10 @@ func isASCIILetter(b byte) bool {
 // ^{commit} peel collapses a tag or tree ref to its commit; --verify --quiet
 // makes an unresolvable ref exit non-zero silently rather than printing an error.
 func (p *Provider) resolveCommit(ctx context.Context, ref string) string {
-	out, err := p.runGit(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	out, stderr, err := p.runGitSplit(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 	if err != nil {
+		p.resolutionError = err
+		p.resolutionDiagnostic = stderr
 		return ""
 	}
 	return firstLine(out)
@@ -619,19 +661,29 @@ func firstLine(out string) string {
 // failure if there was one. Stderr is returned separately so the caller can
 // quote it without risking diff content in the error; see runGitSplit.
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, error) {
-	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
+	base := "HEAD"
+	if p.input != nil && p.input.ResolvedBase != "" {
+		base = p.input.ResolvedBase
+	}
+	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--full-index", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, "--")
 	if err == nil && out != "" {
 		return out, "", nil
 	}
 	if ctx.Err() != nil {
 		return "", "", ctx.Err()
 	}
+	p.workspaceIndex = true
 	// Fall back to the staged diff when `git diff HEAD` errored or was empty. This is
 	// not redundant with the call above: in a repository with no commits yet there is no
 	// HEAD, so `git diff HEAD` fails with "bad revision 'HEAD'", but `git diff --staged`
 	// still surfaces staged changes by diffing the index against the empty tree — the only
 	// way to review a workspace before its first commit.
-	return p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
+	args := []string{"-c", "core.quotepath=false", "diff", "--full-index", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U" + fmt.Sprint(DiffContextLines), "--staged", "--end-of-options"}
+	if p.input != nil && p.input.ResolvedBase != "" {
+		args = append(args, p.input.ResolvedBase)
+	}
+	args = append(args, "--")
+	return p.runGitSplit(ctx, args...)
 }
 
 // binarySniffWindow is the number of leading bytes inspected when deciding
@@ -653,14 +705,31 @@ func untrackedBinaryDiff(path string) string {
 }
 
 func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
-	files, err := p.untrackedFilesList(ctx)
+	var files []string
+	var err error
+	if p.evidence != nil {
+		files = p.evidence.untracked
+	} else {
+		files, err = p.untrackedFilesList(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	var results []string
 	for _, f := range files {
-		content, rerr := readWorkspaceFileForDiffWithLimit(p.repoDir, f, maxUntrackedFileSize)
+		var content []byte
+		var rerr error
+		if p.evidence != nil {
+			var text string
+			text, rerr = p.evidence.fileContent(ctx, f)
+			content = []byte(text)
+			if rerr != nil && strings.Contains(p.evidence.entries[f].unavailable, "size limit") {
+				rerr = errWorkspaceFileTooLarge
+			}
+		} else {
+			content, rerr = readWorkspaceFileForDiffWithLimit(p.repoDir, f, maxUntrackedFileSize)
+		}
 		if errors.Is(rerr, errWorkspaceFileTooLarge) {
 			results = append(results, untrackedBinaryDiff(f))
 			continue
@@ -684,6 +753,9 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", f, f))
+		if p.evidence != nil {
+			fmt.Fprintf(&sb, "new file mode %s\n", p.evidence.entries[f].mode)
+		}
 		sb.WriteString("--- /dev/null\n")
 		sb.WriteString(fmt.Sprintf("+++ b/%s\n", f))
 		sb.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", lineCount))
@@ -696,6 +768,9 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 			sb.WriteByte('+')
 			sb.Write(line)
 			sb.WriteByte('\n')
+		}
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			sb.WriteString("\\ No newline at end of file\n")
 		}
 		results = append(results, sb.String())
 	}
@@ -729,7 +804,11 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	return files, nil
 }
 
+// Managed reviews identify original object bytes, not mutable replacement targets.
 func (p *Provider) runGit(ctx context.Context, args ...string) (string, error) {
+	if !p.useReplacementRefs {
+		args = append([]string{"--no-replace-objects"}, args...)
+	}
 	if p.runner != nil {
 		return p.runner.Run(ctx, p.repoDir, args...)
 	}
@@ -757,6 +836,9 @@ func (p *Provider) runGit(ctx context.Context, args ...string) (string, error) {
 // included: a killed process reports the signal rather than the reason, and
 // the reason is what the caller needs.
 func (p *Provider) runGitSplit(ctx context.Context, args ...string) (string, string, error) {
+	if !p.useReplacementRefs {
+		args = append([]string{"--no-replace-objects"}, args...)
+	}
 	if p.runner != nil {
 		stdout, stderr, err := p.runner.RunSplit(ctx, p.repoDir, args...)
 		if ctx.Err() != nil && err != nil {

@@ -68,6 +68,9 @@ type Args struct {
 	// Full-scan reviews are owned by internal/scan and never reach this Args.
 	ReviewMode string
 
+	// ManagedPreview makes Preview use the immutable-object policy of an OCR-managed review.
+	ManagedPreview bool
+
 	// Template loaded from YAML config file.
 	Template template.Template
 
@@ -592,11 +595,8 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 
 	a.diffs = parsed
 
-	// Freeze this run's real commit endpoints and repository identity while the
-	// git-backed provider and a live context are in hand; finalizeManifest reads
-	// these (never re-resolving) so the manifest records the input as it was at
-	// dispatch time, even on a later skipped or failed path.
 	a.inputResolution = provider.ResolveInput(ctx)
+	a.bindEvidence(provider.Evidence())
 	a.repoRemoteIdentity = provider.RemoteIdentity(ctx)
 
 	for i := range a.diffs {
@@ -606,6 +606,26 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (a *Agent) bindEvidence(view *diff.EvidenceView) {
+	if a.args.Tools == nil {
+		return
+	}
+	for _, name := range []string{tool.FileRead.Name(), tool.FileFind.Name(), tool.CodeSearch.Name()} {
+		p, ok := a.args.Tools.Get(name)
+		if !ok {
+			continue
+		}
+		switch p := p.(type) {
+		case *tool.FileReadProvider:
+			p.FileReader.Evidence = view
+		case *tool.FileFindProvider:
+			p.FileReader.Evidence = view
+		case *tool.CodeSearchProvider:
+			p.FileReader.Evidence = view
+		}
+	}
 }
 
 // injectDiffMap builds a read-only DiffMap from parsed diffs and sets it

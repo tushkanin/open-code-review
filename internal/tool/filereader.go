@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/pathutil"
 )
@@ -60,8 +61,9 @@ type FileReader struct {
 	Mode    ReviewMode
 	// Ref is the git ref to use for ModeRange (--to) or ModeCommit (--commit).
 	// Empty for ModeWorkspace.
-	Ref    string
-	Runner *gitcmd.Runner
+	Ref      string
+	Runner   *gitcmd.Runner
+	Evidence *diff.EvidenceView
 }
 
 // Read returns the full content of a file path (relative to RepoDir),
@@ -69,6 +71,16 @@ type FileReader struct {
 // - Workspace: reads directly from the filesystem.
 // - Range / Commit: uses `git show <Ref>:<path>` to read at the given ref.
 func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
+	if fr.Evidence != nil {
+		e, err := fr.Evidence.Read(ctx, path, 1, 0)
+		if err != nil {
+			return "", err
+		}
+		if !e.Available {
+			return "", fmt.Errorf("evidence unavailable: %s", e.Reason)
+		}
+		return e.Content, nil
+	}
 	switch fr.Mode {
 	case ModeWorkspace:
 		return fr.readFromDisk(path)
@@ -140,6 +152,13 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 // ReadLines returns a window of lines from the file plus the total line count.
 // startLine is 1-based; maxLines is the maximum number of lines to collect.
 func (fr *FileReader) ReadLines(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
+	if fr.Evidence != nil {
+		content, err := fr.Read(ctx, path)
+		if err != nil {
+			return nil, 0, err
+		}
+		return scanLines(strings.NewReader(content), startLine, maxLines)
+	}
 	switch fr.Mode {
 	case ModeWorkspace:
 		return fr.readLinesFromDisk(path, startLine, maxLines)
