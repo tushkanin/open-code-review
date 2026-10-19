@@ -138,11 +138,39 @@ make build
 │   ├── session/          # Review session management
 │   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   ├── telemetry/        # OpenTelemetry integration
+│   ├── verification/     # Evidence receipts and finding decisions
 │   └── viewer/           # WebUI session viewer
 ├── pages/                # WebUI frontend
 ├── scripts/              # Build & install scripts
 └── bin/                  # NPM wrapper
 ```
+
+`internal/verification` contains the decision core. It does not run model requests or change the active review filter.
+The caller supplies one captured `diff.EvidenceView`, a verification-context identity, and verifier provenance to `New`.
+The context identity covers verifier inputs. It is separate from the captured code-state identity in each citation.
+
+Use the core in this order:
+
+1. Call `Capture` to assign stable candidate identifiers and retain each original `model.LlmComment`.
+2. Call `Issue` with a repository path and inclusive line range.
+   Deliver the returned citation and source to the verifier together.
+   An unavailable source has an explicit reason and no citation.
+3. Call `Submit` with decisions for candidate identifiers.
+   Confirmation requires a trigger, failure path, consequence, and issued citation.
+   Refutation requires a contradiction explanation and issued citation.
+   The core checks citation integrity, not whether the cited code proves the claim.
+4. Call `Finish`, `Fail`, `Exhaust`, or `Bypass` for undecided candidates.
+   These operations accept optional candidate identifiers.
+   Without identifiers, they apply to all undecided candidates.
+   They preserve completed decisions.
+5. Call `Result` for published findings and the separate versioned report.
+   Publication omits only validated refuted claims.
+   The report retains every candidate and its submitted decisions, including invalid or conflicting submissions.
+
+Callers must serialize access to a core.
+The core copies mutable inputs and outputs to protect stored claims, citations, and decisions.
+It does not write sessions, admit resumed work, or connect to output surfaces.
+Run its isolated Git fixtures with `make test PACKAGES=./internal/verification`.
 
 ## AI-Assisted Development
 
