@@ -78,7 +78,9 @@ type SessionHistory struct {
 	// including any retry after the first, observes the same delivery outcome
 	// rather than a later call falsely reporting success. Read only after
 	// finalizeOnce.Do returns, which establishes the happens-before.
-	finalizeErr error
+	finalizeErr     error
+	verification    verificationState
+	verificationErr error
 }
 
 // FileSession represents the conversation records for a single file subtask.
@@ -332,6 +334,7 @@ func (sh *SessionHistory) Finalize() error {
 		sh.EndTime = time.Now()
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
+		verificationErr := sh.verificationErr
 		manifest := sh.finalManifest
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
@@ -360,6 +363,9 @@ func (sh *SessionHistory) Finalize() error {
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
 			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+		}
+		if verificationErr != nil {
+			sh.finalizeErr = verificationErr
 		}
 	})
 	return sh.finalizeErr

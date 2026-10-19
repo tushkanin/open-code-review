@@ -60,6 +60,8 @@ func validEvidencePath(name string) bool {
 
 func (v *EvidenceView) Input() InputResolution { return v.input }
 
+func (v *EvidenceView) State() string { return v.state }
+
 func (v *EvidenceView) Paths(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -202,21 +202,7 @@ func (c *Core) undecided(state ExecutionState, reason Reason, candidateIDs []str
 }
 
 func (c *Core) Result() Result {
-	result := Result{
-		Published: make([]PublishedFinding, 0, len(c.records)),
-		Report:    Report{Version: RecordVersion, Records: make([]Record, len(c.records))},
-	}
-	for i, record := range c.records {
-		result.Report.Records[i] = cloneRecord(record)
-		if record.Verdict == Refuted {
-			continue
-		}
-		result.Published = append(result.Published, PublishedFinding{
-			CandidateID: record.Candidate.ID, Finding: record.Candidate.Finding,
-			Verification: Summary{Verdict: record.Verdict, State: record.State, Reason: record.Reason},
-		})
-	}
-	return result
+	return ResultFromReport(Report{Version: RecordVersion, Records: c.records})
 }
 
 func nonempty(value, fallback string) string {
@@ -245,7 +231,7 @@ func cloneDecision(decision Decision) Decision {
 	return decision
 }
 
-func cloneRecord(record Record) Record {
+func CloneRecord(record Record) Record {
 	record.Citations = slices.Clone(record.Citations)
 	if record.Confirmation != nil {
 		confirmation := *record.Confirmation

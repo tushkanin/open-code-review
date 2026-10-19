@@ -195,14 +195,70 @@ An interrupted investigation preserves accepted decisions and leaves undecided c
 It runs outside the shared core mutex. A callback error stops the operation and preserves accepted decisions.
 `VerifierResult` exposes the scoped result, disposition, reason, task key, conversation identity, and contract fingerprint.
 `Runner.VerificationContract` returns the effective prompts, schemas, dispatch version, and deterministic fingerprint.
-Later callers include that fingerprint in their verification-context identity.
+Callers include that fingerprint in `verification.ContextInputs.ContractFingerprint`.
 The fingerprint excludes conversation and candidate identifiers.
 
 Verifier request transcripts use `session.VerificationTask`.
 Ordinary transcripts do not replace structured verification events, checkpoints, replay, or resume admission.
-Those storage semantics remain separate work.
+The session storage APIs below provide those records without active review integration.
 Active filter replacement, bypass integration, CLI output, other presentation surfaces, scans, and delegation remain unchanged.
 Run the runner fixtures with `make test PACKAGES=./internal/llmloop`.
+
+### Durable verification sessions
+
+`verification.NewContext` binds explicit verifier inputs to an existing captured evidence view.
+`EvidenceView.State` exposes its sealed code-state identity without another repository capture.
+The context includes fixed endpoints, captured state, ordered diffs, group context, scope, effective rules, background, verifier contracts, and verification mode.
+It excludes candidate identifiers, session identifiers, provider names, and model names.
+Provider and model admission remains separate.
+
+Use the storage APIs in this order:
+
+1. Call `Core.Capture`, then `SessionHistory.CaptureVerification` with the new records and their context.
+   Wait for success before any verifier request.
+   A successful write includes a flush to the existing JSONL stream.
+2. Call `RecordVerificationSnapshot` with each scoped, validated result.
+   This method can serve as `VerifierInput.OnResult`.
+   It preserves candidates from other groups and earlier rounds.
+3. Call `RecordVerificationTerminal` with the context and optional candidate identifiers.
+   Terminal records can retain incomplete uncertainty after an interruption.
+4. Call `RecordVerificationCheckpoint` for each file.
+   The checkpoint binds the context's complete candidate inventory and exact terminal revisions.
+   Revision digests bind the saved record contents.
+   Publication does not define the inventory.
+   A refutation-only checkpoint retains its complete report and an empty comment list.
+
+The event schema is `ocr.verification/v1`, independent of the run manifest schema.
+`LoadVerificationResult` and `ResumeState.VerificationResult` expose publication and the complete report before session finalization.
+`VerificationContext` returns the saved context.
+Malformed, unsupported, conflicting, or torn data prevents verification reuse.
+Replay retains earlier intact audit records and reports invalid data through an error.
+When replay detects invalid data, its publication retains recovered claims as incomplete uncertainty.
+Invalid checkpoint bindings retain saved comments and recoverable file claims without verification.
+A corrupt binding cannot select the recovery inventory.
+
+`ResumeState.ReuseVerification` runs existing mode, input, repository, rules, provider, model, and manifest admission first.
+Manifest coverage still decides whether a file checkpoint can participate.
+The method then compares the full current context and validates accepted citations against the captured evidence view.
+Its disposition distinguishes reusable decisions, valid candidates that require recheck, and fresh group review.
+Later unfinished records cannot authorize reuse through an earlier terminal checkpoint.
+Legacy checkpoints and bypass records remain unverified.
+Workspace resume remains unsupported.
+
+`Core.Restore` installs supported records atomically without recapture.
+It preserves original claims, candidate identifiers, citation identifiers, and completed provenance.
+It returns incomplete candidates separately.
+Rejected submissions remain audit data, not accepted support.
+Historical receipts do not count as evidence delivered to a new verifier conversation.
+Call `RecordVerificationReuse` before the child's checkpoint to make its audit self-contained.
+
+Verification writes and bound checkpoints return marshal, write, newline, and flush errors.
+The session retains a persistence failure and returns it again from later checkpoints and finalization.
+A final record also marks the failure when its writer remains available.
+Affected checkpoints cannot claim verification reuse.
+These APIs do not replace the active filter, orchestrate reviews, add CLI output, or change scans and delegation.
+Run their fixtures with `make test PACKAGES='./internal/verification ./internal/session'`.
+
 
 ## AI-Assisted Development
 

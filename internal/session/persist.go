@@ -24,21 +24,22 @@ var sessionSubDir = "sessions"
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
 type jsonlWriter struct {
-	mu          sync.Mutex
-	sessionID   string
-	repoDir     string
-	gitBranch   string
-	model       string
-	llmSource   string
-	reviewMode  string
-	diffFrom    string
-	diffTo      string
-	diffCommit  string
-	scanPaths   []string
-	resumedFrom string
-	file        *os.File
-	writer      *bufio.Writer
-	lastUUID    string // tracks chain of records via parentUuid
+	mu              sync.Mutex
+	sessionID       string
+	repoDir         string
+	gitBranch       string
+	model           string
+	llmSource       string
+	reviewMode      string
+	diffFrom        string
+	diffTo          string
+	diffCommit      string
+	scanPaths       []string
+	resumedFrom     string
+	file            *os.File
+	writer          *bufio.Writer
+	lastUUID        string // tracks chain of records via parentUuid
+	verificationErr error
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
@@ -392,6 +393,9 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 	if manifest != nil {
 		rec["run_manifest"] = manifest
 	}
+	if jw.verificationErr != nil {
+		rec["verification_error"] = jw.verificationErr.Error()
+	}
 	jw.lastUUID = uuid
 
 	// Marshal explicitly (not via writeRecordLocked) so a marshal failure on the
@@ -421,6 +425,9 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 		if err := jw.file.Close(); err != nil && writeErr == nil {
 			writeErr = fmt.Errorf("close session file: %w", err)
 		}
+	}
+	if jw.verificationErr != nil {
+		return jw.verificationErr
 	}
 	return writeErr
 }
