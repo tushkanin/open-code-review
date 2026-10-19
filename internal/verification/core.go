@@ -34,6 +34,29 @@ func New(view *diff.EvidenceView, contextID string, provenance Provenance) (*Cor
 	}, nil
 }
 
+// BindInvocation checks the caller's captured inputs before a verifier uses this core.
+// Completed records retain the provenance of their accepted work.
+func (c *Core) BindInvocation(view *diff.EvidenceView, candidates []Candidate, provenance Provenance) error {
+	if view != c.view {
+		return errors.New("verification core uses another captured view")
+	}
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		index, ok := c.indices[candidate.ID]
+		if !ok || seen[candidate.ID] || c.records[index].Candidate != candidate {
+			return errors.New("verification candidate does not match the captured claim")
+		}
+		seen[candidate.ID] = true
+	}
+	for _, candidate := range candidates {
+		record := &c.records[c.indices[candidate.ID]]
+		if record.State == Incomplete && len(record.Submissions) == 0 {
+			record.Provenance = provenance
+		}
+	}
+	return nil
+}
+
 func (c *Core) Capture(findings []model.LlmComment, origin Origin) []Candidate {
 	candidates := make([]Candidate, len(findings))
 	for i, finding := range findings {

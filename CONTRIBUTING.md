@@ -172,6 +172,38 @@ The core copies mutable inputs and outputs to protect stored claims, citations, 
 It does not write sessions, admit resumed work, or connect to output surfaces.
 Run its isolated Git fixtures with `make test PACKAGES=./internal/verification`.
 
+`llmloop.Runner.RunVerification` provides an independent, bounded conversation for a supplied group and discovery round.
+It does not replace the active review filter.
+The caller supplies captured candidates, their core and shared mutex, the captured evidence view, group diffs, scope, rules, and background.
+The caller retains its group concurrency slot and deadline.
+The runner checks candidate identity and the core's evidence binding before it sends a request.
+It never accepts discovery messages.
+
+The dedicated dispatcher permits only captured file reads, search, file lookup, captured diff reads, and `verification_submit`.
+It never resolves tools through the review registry or external configuration.
+Source responses keep each receipt with its exact inclusive range and excerpt.
+The dispatcher rejects citations that this conversation does not receive.
+Limited or unavailable coverage cannot establish absence.
+
+Each request uses the runner's provider, resolved model, completion cap, and shared usage counters.
+Cancellation, the caller's deadline, prompt admission, tool rounds, and aggregate budget stop further requests.
+Prompt admission includes verifier schemas and opaque provider history.
+The operation adds no grace request, provider retry layer, or token reservation.
+An interrupted investigation preserves accepted decisions and leaves undecided candidates incomplete and uncertain.
+
+`VerifierInput.OnResult` receives validated snapshots after submissions and at the final disposition.
+It runs outside the shared core mutex. A callback error stops the operation and preserves accepted decisions.
+`VerifierResult` exposes the scoped result, disposition, reason, task key, conversation identity, and contract fingerprint.
+`Runner.VerificationContract` returns the effective prompts, schemas, dispatch version, and deterministic fingerprint.
+Later callers include that fingerprint in their verification-context identity.
+The fingerprint excludes conversation and candidate identifiers.
+
+Verifier request transcripts use `session.VerificationTask`.
+Ordinary transcripts do not replace structured verification events, checkpoints, replay, or resume admission.
+Those storage semantics remain separate work.
+Active filter replacement, bypass integration, CLI output, other presentation surfaces, scans, and delegation remain unchanged.
+Run the runner fixtures with `make test PACKAGES=./internal/llmloop`.
+
 ## AI-Assisted Development
 
 Using AI to help with your development is perfectly welcome, and we are glad if it makes contributing easier. What we cannot accept is code that a model produced going straight into a commit unread, with none of its redundancy or mistakes cleaned up. Submissions like that slow down the review conversation and make a pull request harder to move forward.

@@ -23,6 +23,11 @@
       { "role": "user", "prompt_file": "review_filter_task_user.md" }
     ]
   },
+  "VERIFICATION_TASK": {
+    "messages": [
+      { "role": "system", "prompt_file": "verification_task_system.md" }
+    ]
+  },
   "RE_LOCATION_TASK": {
     "messages": [
       { "role": "system", "prompt_file": "re_location_task_system.md" },
