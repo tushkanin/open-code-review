@@ -19,6 +19,16 @@
 - **配置管理**：在插件内查看/编辑 LLM 提供商配置（写入通过 `ocr config set`）。
 - **模型切换 / 连通性测试**：状态栏切换模型、测试与 LLM 的连通性。
 
+### Verification results
+
+Sidebar cards and native comments show verification status and the supplied reason separately.
+Complete uncertainty, incomplete verification, and explicit bypass remain distinct.
+Legacy findings and unsupported metadata remain unverified.
+Verification counts remain separate from file coverage and published-finding counts.
+Verification does not change content, suggestions, or user action status.
+See [verification results and focused checks](README.md#verification-results) for the full contract.
+
+
 ---
 
 ## 前置依赖

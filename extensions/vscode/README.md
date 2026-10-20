@@ -18,6 +18,27 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
 - **Empty / cancelled / failed states**: dedicated views for no issues, user cancellation, and CLI failure (failures are retryable and surface the real error returned by the CLI).
 - **Configuration management**: view / edit the LLM provider config inside the extension (persisted via `ocr config set`).
 - **Model switching / connectivity test**: switch models and test connectivity to the LLM from the status bar.
+- **Verification labels**: sidebar cards and native comments show verification status and the supplied reason separately from the finding.
+
+### Verification results
+
+`Confirmed` identifies a supported, complete verification summary.
+`Uncertain · verification complete` means that the available evidence does not settle the claim.
+`Uncertain · verification incomplete` identifies an interrupted verification.
+`Unverified · verification skipped` identifies an explicit CLI bypass with `--no-filter`.
+Legacy findings and unsupported metadata show `Unverified`.
+
+The verification summary shows complete, incomplete, and skipped candidate counts with supplied reasons.
+These counts can include refuted candidates that do not appear in the published findings.
+The summary stays separate from file coverage, published-finding counts, and the review's terminal state.
+Missing completion data does not imply complete verification.
+
+Verification does not change finding content, reasoning, suggestions, or user action status.
+Equal findings retain separate action states and reasons.
+Long reasons remain available through the card's scroll area.
+Reasons appear as plain text, including text that resembles HTML or editor command links.
+Findings with no native location remain available in the sidebar.
+
 
 ---
 
@@ -117,6 +138,11 @@ yarn build        # production build (webpack production; runs automatically bef
 yarn test         # run Jest unit tests
 yarn lint         # ESLint
 yarn package      # produce a distributable .vsix package (see "Build a release package")
+
+# Focused verification regressions
+corepack yarn test --runInBand verificationResult.test.ts verificationComments.test.ts
+# Run from extensions/frontend for shared metadata and occurrence-state checks
+npm test -- --runInBand verification.test.ts
 ```
 
 ### Debugging notes

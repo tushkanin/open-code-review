@@ -13,6 +13,7 @@ import { DoneView } from './views/DoneView';
 import { EmptyView } from './views/EmptyView';
 import { CancelledView } from './views/CancelledView';
 import { FailedView } from './views/FailedView';
+import { VerificationSummary } from './components/VerificationSummary';
 import './styles/global.css';
 
 export function App() {
@@ -56,6 +57,9 @@ export function App() {
 
           {state.view !== 'idle' && (
             <div class="result-region">
+              {state.view !== 'running' && state.session.result && (
+                <VerificationSummary completion={state.session.result.verificationCompletion} />
+              )}
               {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
               {state.view === 'done' && state.session.result && (
                 <DoneView result={state.session.result} commentStatus={state.commentStatus}
