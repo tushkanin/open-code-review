@@ -29,7 +29,12 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/verification"
 )
+
+type verificationResultProvider interface {
+	VerificationResult() verification.Result
+}
 
 // commonContext bundles the state that both `ocr review` and `ocr scan`
 // need to load *before* deciding whether to dispatch a preview or a real
@@ -210,10 +215,11 @@ type llmRuntime struct {
 	// two runs in one process cannot share data. scan gets one too; its requests
 	// carry no RequestMeta, so every attempt is dropped and the frozen report is
 	// nil.
+	// CLI transports have no HTTP attempts and use a nil collector.
 	RetryCollector *llm.RetryCollector
 	// RawHolder is the opt-in raw LLM capture sink (OCR_RAW_LOGGING=1),
 	// created with the client because the middleware mounts at construction;
-	// the per-session writer is bound later by bindRawWriter. Nil when off.
+	// the per-session writer is bound later by bindRawWriter. Nil when off or on a CLI transport.
 	RawHolder *llm.RawHolder
 	AppCfg    *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
@@ -264,10 +270,13 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
-	retryCollector := newRetryCollector()
+	var retryCollector *llm.RetryCollector
+	if !llm.IsCLIProtocol(ep.Protocol) {
+		retryCollector = newRetryCollector()
+	}
 
 	var rawHolder *llm.RawHolder
-	if llm.RawLoggingEnabled() {
+	if !llm.IsCLIProtocol(ep.Protocol) && llm.RawLoggingEnabled() {
 		rawHolder = llm.NewRawHolder()
 	}
 
@@ -830,6 +839,11 @@ func emitRunResult(
 ) error {
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
+	var verified *verification.Result
+	if provider, ok := ag.(verificationResultProvider); ok {
+		result := provider.VerificationResult()
+		verified = &result
+	}
 
 	duration := time.Since(startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
@@ -883,12 +897,23 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, verified)
 	}
 	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out, verified)
 	}
-	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	if verified == nil {
+		outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	} else {
+		if manifest != nil {
+			fmt.Fprintln(out, manifestMessage(manifest, len(comments)))
+		}
+		for _, finding := range projectFindings(comments, verified.Published) {
+			renderFinding(finding, out)
+		}
+		outputVerificationCompletion(out, verified.Report)
+		outputTextWithWarnings(nil, ag.Warnings(), nil, io.Discard)
+	}
 	// Between the comments/warnings block and the project summary: the report is
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.

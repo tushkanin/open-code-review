@@ -62,6 +62,10 @@ func parseDiffHeaderLine(line string) (oldPath string, newPath string, ok bool) 
 // runner, if non-nil, is used to execute git subprocesses through a
 // shared concurrency limiter.
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
+	return parseDiffText(ctx, diffText, repoDir, ref, runner, nil)
+}
+
+func parseDiffText(ctx context.Context, diffText, repoDir, ref string, runner *gitcmd.Runner, read func(context.Context, string) (string, error)) ([]model.Diff, error) {
 	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
@@ -82,7 +86,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
-				finalizeDiff(ctx, current, repoDir, ref, runner)
+				finalizeDiff(ctx, current, repoDir, ref, runner, read)
 				diffs = append(diffs, *current)
 				buf.Reset()
 			}
@@ -139,21 +143,23 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// Flush last diff
 	if current != nil {
 		current.Diff = strings.TrimSuffix(buf.String(), "\n")
-		finalizeDiff(ctx, current, repoDir, ref, runner)
+		finalizeDiff(ctx, current, repoDir, ref, runner, read)
 		diffs = append(diffs, *current)
 	}
 
 	return diffs, nil
 }
 
-// finalizeDiff reads the new file content. When ref is non-empty it uses
-// git show to read the file at that ref; otherwise it reads from disk.
-func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string, runner *gitcmd.Runner) {
+func finalizeDiff(ctx context.Context, d *model.Diff, repoDir, ref string, runner *gitcmd.Runner, read func(context.Context, string) (string, error)) {
 	if d.IsDeleted || d.NewPath == "/dev/null" {
 		d.NewPath = "/dev/null"
 		return
 	}
 	if d.IsBinary {
+		return
+	}
+	if read != nil {
+		d.NewFileContent, _ = read(ctx, d.NewPath)
 		return
 	}
 	if ref != "" {

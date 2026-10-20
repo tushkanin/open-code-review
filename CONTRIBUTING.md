@@ -138,11 +138,148 @@ make build
 │   ├── session/          # Review session management
 │   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   ├── telemetry/        # OpenTelemetry integration
+│   ├── verification/     # Evidence receipts and finding decisions
 │   └── viewer/           # WebUI session viewer
 ├── pages/                # WebUI frontend
 ├── scripts/              # Build & install scripts
 └── bin/                  # NPM wrapper
 ```
+
+`internal/verification` contains the decision core. The review agent uses it after each discovery round.
+The caller supplies one captured `diff.EvidenceView`, a verification-context identity, and verifier provenance to `New`.
+The context identity covers verifier inputs. It is separate from the captured code-state identity in each citation.
+
+Use the core in this order:
+
+1. Call `Capture` to assign stable candidate identifiers and retain each original `model.LlmComment`.
+2. Call `Issue` with a repository path and inclusive line range.
+   Deliver the returned citation and source to the verifier together.
+   An unavailable source has an explicit reason and no citation.
+3. Call `Submit` with decisions for candidate identifiers.
+   Confirmation requires a trigger, failure path, consequence, and issued citation.
+   Refutation requires a contradiction explanation and issued citation.
+   The core checks citation integrity, not whether the cited code proves the claim.
+4. Call `Finish`, `Fail`, `Exhaust`, or `Bypass` for undecided candidates.
+   These operations accept optional candidate identifiers.
+   Without identifiers, they apply to all undecided candidates.
+   They preserve completed decisions.
+5. Call `Result` for published findings and the separate versioned report.
+   Publication omits only validated refuted claims.
+   The report retains every candidate and its submitted decisions, including invalid or conflicting submissions.
+
+Callers must serialize access to a core.
+The core copies mutable inputs and outputs to protect stored claims, citations, and decisions.
+It does not write sessions, admit resumed work, or connect to output surfaces.
+Run its isolated Git fixtures with `make test PACKAGES=./internal/verification`.
+
+`llmloop.Runner.RunVerification` provides an independent, bounded conversation for a supplied group and discovery round.
+The review agent calls it after durable candidate capture and before publication.
+The caller supplies captured candidates, their core and shared mutex, the captured evidence view, group diffs, scope, rules, and background.
+The caller retains its group concurrency slot and deadline.
+The runner checks candidate identity and the core's evidence binding before it sends a request.
+It never accepts discovery messages.
+
+The dedicated dispatcher permits only captured file reads, search, file lookup, captured diff reads, and `verification_submit`.
+It never resolves tools through the review registry or external configuration.
+Source responses keep each receipt with its exact inclusive range and excerpt.
+The dispatcher rejects citations that this conversation does not receive.
+Limited or unavailable coverage cannot establish absence.
+
+Each request uses the runner's provider, resolved model, completion cap, and shared usage counters.
+Cancellation, the caller's deadline, prompt admission, tool rounds, and aggregate budget stop further requests.
+Prompt admission includes verifier schemas and opaque provider history.
+The operation adds no grace request, provider retry layer, or token reservation.
+An interrupted investigation preserves accepted decisions and leaves undecided candidates incomplete and uncertain.
+
+`VerifierInput.OnResult` receives validated snapshots after submissions and at the final disposition.
+It runs outside the shared core mutex. A callback error stops the operation and preserves accepted decisions.
+`VerifierResult` exposes the scoped result, disposition, reason, task key, conversation identity, and contract fingerprint.
+`Runner.VerificationContract` returns the effective prompts, schemas, dispatch version, and deterministic fingerprint.
+Callers include that fingerprint in `verification.ContextInputs.ContractFingerprint`.
+The fingerprint excludes conversation and candidate identifiers.
+
+Verifier request transcripts use `session.VerificationTask`.
+Ordinary transcripts do not replace structured verification events, checkpoints, replay, or resume admission.
+The review agent connects these APIs to structured session records and CLI output.
+The viewer and ACP adapter preserve the delivered verification metadata through their separate consumer paths.
+Scans, delegation, editor interfaces, and CI publishers retain their separate behavior.
+Run the runner fixtures with `make test PACKAGES=./internal/llmloop`.
+
+### Durable verification sessions
+
+`verification.NewContext` binds explicit verifier inputs to an existing captured evidence view.
+`EvidenceView.State` exposes its sealed code-state identity without another repository capture.
+The context includes fixed endpoints, captured state, ordered diffs, group context, scope, effective rules, background, verifier contracts, and verification mode.
+It excludes candidate identifiers, session identifiers, provider names, and model names.
+Provider and model admission remains separate.
+
+Use the storage APIs in this order:
+
+1. Call `Core.Capture`, then `SessionHistory.CaptureVerification` with the new records and their context.
+   Wait for success before any verifier request.
+   A successful write includes a flush to the existing JSONL stream.
+2. Call `RecordVerificationSnapshot` with each scoped, validated result.
+   This method can serve as `VerifierInput.OnResult`.
+   It preserves candidates from other groups and earlier rounds.
+3. Call `RecordVerificationTerminal` with the context and optional candidate identifiers.
+   Terminal records can retain incomplete uncertainty after an interruption.
+4. Call `RecordVerificationCheckpoint` for each file.
+   The checkpoint binds the context's complete candidate inventory and exact terminal revisions.
+   Revision digests bind the saved record contents.
+   Publication does not define the inventory.
+   A refutation-only checkpoint retains its complete report and an empty comment list.
+
+The event schema is `ocr.verification/v1`, independent of the run manifest schema.
+`LoadVerificationResult` and `ResumeState.VerificationResult` expose publication and the complete report before session finalization.
+`VerificationContext` returns the saved context.
+Malformed, unsupported, conflicting, or torn data prevents verification reuse.
+Replay retains earlier intact audit records and reports invalid data through an error.
+When replay detects invalid data, its publication retains recovered claims as incomplete uncertainty.
+Invalid checkpoint bindings retain saved comments and recoverable file claims without verification.
+A corrupt binding cannot select the recovery inventory.
+
+`ReplayReviewSession` reads an already selected JSONL stream through the same replay implementation.
+The viewer opens the file under its validated session root, including an archived root.
+It uses `SavedFindings` for publication and retains the complete report when replay reports an audit error.
+Live pages and default HTML export share this projection and template.
+Comparison consumes occurrence metadata from each side without changing the finding key.
+
+The ACP module models the CLI contract independently.
+Its explicit audit claim type excludes private reasoning before the final message serializes structured details.
+The complete audit remains separate from the delivered published `comments` array.
+Verification completion does not replace discovery coverage or terminal status.
+
+`ResumeState.ReuseVerification` runs existing mode, input, repository, rules, provider, model, and manifest admission first.
+Manifest coverage still decides whether a file checkpoint can participate.
+The method then compares the full current context and validates accepted citations against the captured evidence view.
+Its disposition distinguishes reusable decisions, valid candidates that require recheck, and fresh group review.
+Later unfinished records cannot authorize reuse through an earlier terminal checkpoint.
+Legacy checkpoints and bypass records remain unverified.
+Workspace resume remains unsupported.
+
+`Core.Restore` installs supported records atomically without recapture.
+It preserves original claims, candidate identifiers, citation identifiers, and completed provenance.
+It returns incomplete candidates separately.
+Rejected submissions remain audit data, not accepted support.
+Historical receipts do not count as evidence delivered to a new verifier conversation.
+Call `RecordVerificationReuse` before the child's checkpoint to make its audit self-contained.
+
+Verification writes and bound checkpoints return marshal, write, newline, and flush errors.
+The session retains a persistence failure and returns it again from later checkpoints and finalization.
+A final record also marks the failure when its writer remains available.
+Affected checkpoints cannot claim verification reuse.
+The review agent drains each producer group's workers before capture, including error and cancellation exits.
+It retains producer ownership when source resolution moves a claim to another file.
+Later discovery rounds receive original claims with their actual verification dispositions.
+Group reuse validates every member against current full context before it restores one shared inventory.
+Concurrent group workers share one immutable reuse index through synchronized initialization.
+Incomplete candidates receive recheck under their saved group and round.
+CLI projections retain candidate identity separately from original finding fields.
+Saved publication uses candidate identity, not claim text, to select trusted findings.
+Historical display retains fingerprint-less checkpoints without adding them to the reuse index.
+Scans, delegation, and workspace resume boundaries remain unchanged.
+Run their fixtures with `make test PACKAGES='./internal/verification ./internal/session'`.
+
 
 ## AI-Assisted Development
 

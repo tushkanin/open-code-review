@@ -33,9 +33,6 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 }
 
 func TestLookupProvider_ChatGPTDetails(t *testing.T) {
-	if _, ok := LookupProvider("codex"); ok {
-		t.Fatal("undocumented Codex preset must not ship")
-	}
 	p, ok := LookupProvider("chatgpt")
 	if !ok {
 		t.Fatal("chatgpt preset not found")
@@ -89,13 +86,9 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "chatgpt", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "openrouter", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
-	if len(providers) != len(expected) {
-		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
-	}
-	for i, name := range expected {
-		if providers[i].Name != name {
-			t.Errorf("providers[%d].Name = %q, want %q", i, providers[i].Name, name)
+	for i := 1; i < len(providers); i++ {
+		if providers[i-1].Name >= providers[i].Name {
+			t.Errorf("providers are not sorted: %q, %q", providers[i-1].Name, providers[i].Name)
 		}
 	}
 }

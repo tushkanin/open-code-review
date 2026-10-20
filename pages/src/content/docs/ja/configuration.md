@@ -41,10 +41,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 場合は対応する環境変数を使用します。`chatgpt` は代わりに `ocr auth login` で
 作成した ChatGPT 認証情報を使用します。
 
+Claude Code と Codex はネイティブ CLI の認証を使用します。OCR の API key や HTTP URL は不要です。
+
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
+| `claude-code` | claude-code-cli | — | —（ネイティブ CLI の認証） |
+| `codex` | codex-cli | — | —（ネイティブ CLI の認証） |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | 該当なし（Sign in with ChatGPT） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
@@ -74,7 +78,34 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
 検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
 
-## ChatGPT サインインのプレビュー
+### ネイティブの推論 effort
+
+`~/.opencodereview/config.json` の各ネイティブ provider に `reasoning_effort` を設定します:
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+この値は Claude の `CLAUDE_CODE_EFFORT_LEVEL` または Codex のネイティブ設定 `model_reasoning_effort` を上書きします。
+フィールドを省略するか `""` に設定すると、ネイティブ CLI の設定を保持します。
+使用できる値はネイティブ CLI と選択したモデルによって異なります。
+`claude-code-cli` または `codex-cli` のカスタム provider も同じフィールドを使用できます。
+HTTP provider では、モデル固有のリクエスト設定に `extra_body` を使用します。
+トップレベルの `effort` と `--effort` は OCR のレビューラウンド数を制御します。モデルの推論 effort は変更しません。
+
+### ChatGPT サインインのプレビュー
 
 このプレビューでは公開 Responses API 用の組み込み `chatgpt` provider が追加されます。API key 環境変数はありません。 サインイン、同意、利用制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
 
@@ -167,9 +198,14 @@ Model:  claude-sonnet-5
 名前の先頭・末尾のドット、連続したドット、空または空白のみの区切り部分は使用できません。
 ドットを含まない名前は引き続きフィールドの設定時に自動作成されます。
 
-上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
-`protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
-`openai-responses`、または `anthropic-bedrock`）。
+上記の表にない provider 名はすべてカスタムとみなします。
+`protocol` には `anthropic`、`openai`、`openai-responses`、
+`anthropic-bedrock`、`claude-code-cli`、`codex-cli` を指定できます。
+`anthropic`、`openai`、`openai-responses` プロトコルには `url` が必要です。
+ネイティブの `claude-code-cli` と `codex-cli` のエントリにはモデルが必要です。
+これらはネイティブ CLI の認証を使用します。OCR の `url`、`api_key`、`api_key_cmd` は不要です。
+
+次の例は HTTP provider を使用します。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -361,11 +397,11 @@ ocr review --max-tokens 400000
 ocr scan --max-tokens 120000
 ```
 
-実行時のフラグは `max_tokens` より優先されます。どちらも設定されていない場合、
-OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限が制約するのは
-**プロンプト**だけです。モデルの出力上限は別の `MAX_COMPLETION_TOKENS`（デフォルト
-`16384`）が制御するため、`max_tokens` を上げても出力予算は一緒に広がりません。また、
-実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
+実行時のフラグは `max_tokens` より優先されます。
+どちらも設定されていない場合、OCR は組み込みのタスクテンプレートのデフォルト値を使用します。
+プロンプト上限は `MAX_COMPLETION_TOKENS`（両テンプレートで `16384`）とは独立しています。
+ネイティブ Codex では、OCR はこの値を指針として会話記録に含めます。ネイティブの出力トークン上限を強制する値ではありません。
+プロンプト上限は、実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
 組み込みのデフォルトに戻すには `ocr config unset max_tokens` を実行してください。
 
 ### レビューの労力プリセット（effort）
@@ -396,21 +432,25 @@ Claude Code の `ANTHROPIC_*` や OCR 独自の `OCR_LLM_*` 環境変数をす�
 
 ### CC-Switch を使う
 
-[CC-Switch](https://github.com/farion1231/cc-switch) を
+この設定手順は HTTP provider のみに適用します。
+[CC-Switch](https://github.com/farion1231/cc-switch) の
 [ルーティングサービス](https://www.ccswitch.io/en/docs?section=proxy&item=service)
-有効で使用している場合、プロバイダーの `url` をローカルプロキシに向けるだけで、
-追加設定なしで利用できます：
+を有効にした場合、HTTP provider の `url` をローカルプロキシに設定します：
 
 ```bash
-# Claude（Anthropic 互換）
+# Anthropic 互換の HTTP provider
 ocr config set providers.anthropic.url http://127.0.0.1:15721
 
-# Codex / OpenAI 互換 — そのプロバイダーの url キーを設定
+# OpenAI 互換の HTTP provider
 ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ```
 
-`api_key` は任意の値で構いません。`extra_body`（およびその他のプロバイダー固有フィールド）は
-引き続き有効です。
+これらの HTTP provider では、`api_key` にプロキシが受け付ける任意の値を指定できます。
+`extra_body` とその他の HTTP リクエストフィールドも適用します。
+
+ネイティブ Codex は自身の CLI 設定でルーティングと認証を制御します。
+OCR の `url`、`api_key`、`extra_body` はネイティブ Codex のリクエストを制御しません。
+`codex` エントリにこの HTTP 設定手順を適用するには、`openai-responses` などの HTTP プロトコルを明示的に選択する必要があります。
 
 ### ベンダー固有のフィールドを送信する
 

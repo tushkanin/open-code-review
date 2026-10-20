@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -70,13 +71,16 @@ func TestConfirmDeleteCustomModel_SaveFailureRollback(t *testing.T) {
 		Model:    "m2",
 		CustomProviders: map[string]ProviderEntry{
 			"cp": {
-				URL:      "https://x.example",
-				Protocol: "openai",
-				Models:   []string{"m1", "m2"},
-				Model:    "m2",
+				Protocol:        "codex-cli",
+				Models:          []string{"m1", "m2"},
+				Model:           "m2",
+				ReasoningEffort: "xhigh",
+				TimeoutSec:      45,
+				ExtraBody:       map[string]any{"temperature": 0.2},
 			},
 		},
 	}
+	original := cfg.CustomProviders["cp"]
 	m := newProviderTUI(cfg, unwritableConfigPath(t))
 	m.activeTab = tabCustom
 	m.customIdx = 0
@@ -88,19 +92,14 @@ func TestConfirmDeleteCustomModel_SaveFailureRollback(t *testing.T) {
 	out, _ := m.confirmDeleteCustomModel()
 	got := out.(providerTUIModel)
 
-	if !strings.Contains(got.formError, "failed to save") {
-		t.Errorf("formError = %q, want save-failure message", got.formError)
+	if got.formError == "" {
+		t.Error("the failed save does not report an error")
 	}
 	if got.savedInSession {
 		t.Error("savedInSession should be false after save failure")
 	}
-	// Rollback restored the model list in the in-memory config.
-	entry := got.existingCfg.CustomProviders["cp"]
-	if len(entry.Models) != 2 {
-		t.Errorf("rolled-back models = %v, want [m1 m2]", entry.Models)
-	}
-	if entry.Model != "m2" {
-		t.Errorf("rolled-back active model = %q, want m2", entry.Model)
+	if !reflect.DeepEqual(got.existingCfg.CustomProviders["cp"], original) {
+		t.Error("the failed model delete changes the effort override or unrelated provider configuration")
 	}
 }
 

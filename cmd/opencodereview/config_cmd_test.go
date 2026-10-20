@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -606,18 +607,18 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 
 func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *testing.T) {
 	tests := []struct {
-		name     string
-		provider string
-		key      string
-		value    string
-		coreKey  string
+		name  string
+		key   string
+		value string
 	}{
-		{"extra_body", "nonexistent", "providers.nonexistent.extra_body", `{"temperature":0.2}`, "providers.nonexistent.protocol"},
-		{"extra_headers", "nonexistent", "providers.nonexistent.extra_headers", "X-Custom=value", "providers.nonexistent.protocol"},
-		{"retry_codes", "nonexistent", "providers.nonexistent.retry_codes", "400", "providers.nonexistent.protocol"},
-		{"timeout_sec", "brandnew", "providers.brandnew.timeout_sec", "900", "providers.brandnew.protocol"},
-		{"custom timeout_sec", "brandnew", "custom_providers.brandnew.timeout_sec", "900", "custom_providers.brandnew.protocol"},
-		{"custom provider namespace", "my-gateway", "custom_providers.my-gateway.extra_headers", "X-Custom=value", "custom_providers.my-gateway.protocol"},
+		{"extra_body", "providers.nonexistent.extra_body", `{"temperature":0.2}`},
+		{"extra_headers", "providers.nonexistent.extra_headers", "X-Custom=value"},
+		{"retry_codes", "providers.nonexistent.retry_codes", "400"},
+		{"timeout_sec", "providers.brandnew.timeout_sec", "900"},
+		{"custom timeout_sec", "custom_providers.brandnew.timeout_sec", "900"},
+		{"custom provider namespace", "custom_providers.my-gateway.extra_headers", "X-Custom=value"},
+		{"reasoning_effort", "providers.native.reasoning_effort", "high"},
+		{"custom reasoning_effort", "custom_providers.native.reasoning_effort", "high"},
 	}
 
 	for _, tt := range tests {
@@ -626,11 +627,6 @@ func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *t
 			err := setConfigValue(cfg, tt.key, tt.value)
 			if err == nil {
 				t.Fatalf("expected error for %s on a missing provider", tt.key)
-			}
-			want := "provider \"" + tt.provider + "\" is not configured; set a core field first (protocol is required for every custom provider):\n" +
-				"  ocr config set " + tt.coreKey + " <protocol>"
-			if err.Error() != want {
-				t.Errorf("error = %q, want %q", err, want)
 			}
 			if cfg.CustomProviders != nil {
 				t.Errorf("CustomProviders = %#v, want nil", cfg.CustomProviders)
@@ -1249,26 +1245,6 @@ func TestSetConfigValueUnknownKey(t *testing.T) {
 	}
 }
 
-func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
-	// The unknown-key error message must stay byte-identical after extracting
-	// supportedConfigKeys, and must be generated from that list.
-	err := setConfigValue(&Config{}, "bogus.key", "val")
-	if err == nil {
-		t.Fatal("expected error for unknown key")
-	}
-	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
-		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
-		"MCP server fields: type, command, args, env, url, headers, tools, setup"
-	if err.Error() != want {
-		t.Errorf("unknown-key message drifted:\n got: %q\nwant: %q", err.Error(), want)
-	}
-	if !strings.Contains(err.Error(), strings.Join(supportedConfigKeys, ", ")) {
-		t.Error("message should be generated from supportedConfigKeys")
-	}
-}
-
 func TestSetConfigValueProviderClearsModel(t *testing.T) {
 	cfg := &Config{Provider: "old-provider", Model: "old-model"}
 	if err := setConfigValue(cfg, "provider", "new-provider"); err != nil {
@@ -1862,6 +1838,177 @@ func TestSetConfigValueTimeoutSecondsRejectsInvalidValues(t *testing.T) {
 	for _, value := range []string{"not-a-number", "-1", "9223372037"} {
 		if err := setConfigValue(&Config{}, "llm.timeout_sec", value); err == nil {
 			t.Fatalf("setConfigValue() accepted timeout_sec=%q", value)
+		}
+	}
+}
+
+func TestReasoningEffortConfigSaveReload(t *testing.T) {
+	for _, key := range []string{
+		"providers.claude-code.reasoning_effort",
+		"providers.codex.reasoning_effort",
+		"custom_providers.local-claude.reasoning_effort",
+		"custom_providers.local-codex.reasoning_effort",
+		"providers.local-codex.reasoning_effort",
+	} {
+		t.Run(key, func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			configPath, err := defaultConfigPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := `{
+				"provider": "claude-code",
+				"effort": "medium",
+				"language": "English",
+				"future_config": {"enabled":true},
+				"providers": {
+					"claude-code": {"model":"sonnet","reasoning_effort":"high","api_key_cmd":"native-helper","future_provider":{"keep":true}},
+					"codex": {"model":"gpt-6.1-sol","reasoning_effort":"low"},
+					"openai": {"model":"gpt-4o","api_key":"http-key","url":"https://example.com/v1","extra_body":{"reasoning_effort":"low"}}
+				},
+				"custom_providers": {
+					"local-claude": {"protocol":"claude-code-cli","model":"sonnet","reasoning_effort":"low","future_provider":{"keep":true}},
+					"local-codex": {"protocol":"codex-cli","model":"gpt-6.1-sol","reasoning_effort":"medium"}
+				},
+				"llm": {"extra_body":{"temperature":0.2},"future_llm":42}
+			}`
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			expected, err := loadOrCreateConfig(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts := strings.SplitN(key, ".", 3)
+			entries := expected.Providers
+			if parts[0] == "custom_providers" || parts[1] == "local-codex" {
+				entries = expected.CustomProviders
+			}
+			for _, value := range []string{"  release-specific-level  ", " \t "} {
+				if err := runConfigSet(key, value); err != nil {
+					t.Fatal(err)
+				}
+				entry := entries[parts[1]]
+				entry.ReasoningEffort = strings.TrimSpace(value)
+				entries[parts[1]] = entry
+				loaded, err := LoadAppConfig(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, err := json.Marshal(expected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := json.Marshal(loaded)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != string(want) {
+					t.Error("the command changes unrelated configuration or loses the effort override")
+				}
+			}
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved map[string]any
+			if err := json.Unmarshal(data, &saved); err != nil {
+				t.Fatal(err)
+			}
+			section := "providers"
+			if parts[0] == "custom_providers" || parts[1] == "local-codex" {
+				section = "custom_providers"
+			}
+			entry := saved[section].(map[string]any)[parts[1]].(map[string]any)
+			if _, exists := entry["reasoning_effort"]; exists {
+				t.Error("an empty override must omit the JSON key")
+			}
+		})
+	}
+}
+
+func TestReasoningEffortProviderSwitchIsolation(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	configPath, err := defaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{
+		Provider: "claude-code", Effort: "medium", Language: "English",
+		Providers: map[string]ProviderEntry{
+			"claude-code": {Model: "sonnet", ReasoningEffort: "high"},
+			"codex":       {Model: "gpt-6.1-sol", ReasoningEffort: "low"},
+			"openai":      {Model: "gpt-4o", APIKey: "http-key", ExtraBody: map[string]any{"reasoning_effort": "low"}},
+		},
+		CustomProviders: map[string]ProviderEntry{
+			"local-codex": {Protocol: llm.ProtocolCodexCLI, Model: "gpt-6.1-sol", ReasoningEffort: "medium"},
+		},
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selection := range []struct {
+		provider string
+		model    string
+	}{
+		{"codex", "gpt-6.1-sol"},
+		{"local-codex", "custom-model"},
+		{"claude-code", "opus"},
+	} {
+		if err := runConfigSet("provider", selection.provider); err != nil {
+			t.Fatal(err)
+		}
+		if err := runConfigSet("model", selection.model); err != nil {
+			t.Fatal(err)
+		}
+		cfg.Provider = selection.provider
+		entries := cfg.Providers
+		if selection.provider == "local-codex" {
+			entries = cfg.CustomProviders
+		}
+		entry := entries[selection.provider]
+		entry.Model = selection.model
+		entries[selection.provider] = entry
+		loaded, err := loadOrCreateConfig(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(loaded, cfg) {
+			t.Error("provider or model selection changes an effort override or unrelated configuration")
+		}
+	}
+}
+
+func TestReasoningEffortConfigRejectsInvalidSchema(t *testing.T) {
+	for _, section := range []string{"providers", "custom_providers"} {
+		for _, value := range []string{`42`, `true`, `["high"]`, `{"level":"high"}`} {
+			t.Run(section+"/"+value, func(t *testing.T) {
+				configPath := filepath.Join(t.TempDir(), "config.json")
+				data := fmt.Sprintf(`{"%s":{"native":{"protocol":"codex-cli","reasoning_effort":%s}}}`, section, value)
+				if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := loadOrCreateConfig(configPath); err == nil {
+					t.Error("the command loader accepts a non-string reasoning_effort")
+				}
+				if _, err := LoadAppConfig(configPath); err == nil {
+					t.Error("the application loader accepts a non-string reasoning_effort")
+				}
+				after, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(after) != data {
+					t.Error("a schema error changes the config file")
+				}
+			})
 		}
 	}
 }

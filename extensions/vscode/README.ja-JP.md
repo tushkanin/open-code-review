@@ -19,6 +19,16 @@
 - **設定の管理**：LLM プロバイダーの設定を拡張機能内で表示・編集できます（保存は `ocr config set` 経由）。
 - **モデル切り替えと接続テスト**：ステータスバーからモデルを切り替え、LLM への接続をテストできます。
 
+### Verification results
+
+Sidebar cards and native comments show verification status and the supplied reason separately.
+Complete uncertainty, incomplete verification, and explicit bypass remain distinct.
+Legacy findings and unsupported metadata remain unverified.
+Verification counts remain separate from file coverage and published-finding counts.
+Verification does not change content, suggestions, or user action status.
+See [verification results and focused checks](README.md#verification-results) for the full contract.
+
+
 ---
 
 ## 前提条件

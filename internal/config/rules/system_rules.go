@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -204,16 +205,19 @@ func expandBraces(s string) []string {
 
 // ProjectRuleEntry is a single entry in .opencodereview/rule.json.
 type ProjectRuleEntry struct {
-	Path            string `json:"path"`
-	Rule            string `json:"rule"`
-	MergeSystemRule bool   `json:"merge_system_rule,omitempty"`
+	Path             string `json:"path"`
+	Rule             string `json:"rule"`
+	MergeSystemRule  bool   `json:"merge_system_rule,omitempty"`
+	MergeParentRules bool   `json:"merge_parent_rules,omitempty"`
+	sources          []string
 }
 
-// ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
+// ProjectRule holds the rules and file filters from one user config.
 type ProjectRule struct {
-	Rules   []ProjectRuleEntry `json:"rules"`
-	Include []string           `json:"include,omitempty"`
-	Exclude []string           `json:"exclude,omitempty"`
+	Rules      []ProjectRuleEntry `json:"rules"`
+	Include    []string           `json:"include,omitempty"`
+	Exclude    []string           `json:"exclude,omitempty"`
+	FilterMode string             `json:"filter_mode,omitempty"`
 }
 
 // FileFilter holds the merged user-configured include/exclude glob patterns
@@ -264,10 +268,8 @@ func (f *FileFilter) IsUserIncluded(path string) bool {
 
 // composedResolver implements Resolver with layered priority.
 type composedResolver struct {
-	custom  *ProjectRule // highest: --rule flag
-	project *ProjectRule // high: .opencodereview/rule.json
-	global  *ProjectRule // low: ~/.opencodereview/rule.json
-	system  systemLayer  // lowest: embedded default, decorated by sniffer
+	layers []ruleLayer
+	system systemLayer
 }
 
 // ResolverOptions carries the optional git context the resolver needs to read
@@ -287,7 +289,7 @@ type ResolverOptions struct {
 
 // NewResolver builds a Resolver with the following priority:
 //  1. Custom rule file specified via --rule flag (first match wins)
-//  2. Project-local .opencodereview/rule.json (first match wins)
+//  2. Project configs from the repo root upward, nearest first
 //  3. Global ~/.opencodereview/rule.json (first match wins)
 //  4. Embedded system default rules
 //
@@ -295,7 +297,7 @@ type ResolverOptions struct {
 // Objective-C when their content says so. Wrapping the *system* layer (rather
 // than the composed resolver) keeps user layers outranking the sniff.
 //
-// It also returns a FileFilter with the merged include/exclude patterns from all layers.
+// Ancestor inheritance is opt-in. It also returns the effective file filter.
 func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver, *FileFilter, error) {
 	sysRule, err := LoadDefault()
 	if err != nil {
@@ -316,13 +318,13 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 		customRule = cr
 	}
 
-	var projectRule *ProjectRule
+	var projectRules []*ProjectRule
 	if repoDir != "" {
-		pr, err := loadProjectRule(repoDir)
+		pr, err := loadProjectRules(repoDir)
 		if err != nil {
 			return nil, nil, err
 		}
-		projectRule = pr
+		projectRules = pr
 	}
 
 	globalRule, err := loadGlobalRule()
@@ -330,12 +332,11 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 		return nil, nil, err
 	}
 
-	filter := buildFileFilter(customRule, projectRule, globalRule)
+	layers := buildRuleLayers(customRule, projectRules, globalRule)
+	filter := buildFileFilter(layers)
 
 	return &composedResolver{
-		custom:  customRule,
-		project: projectRule,
-		global:  globalRule,
+		layers: layers,
 		system: &sniffer{
 			inner:    sysRule,
 			repoDir:  repoDir,
@@ -344,28 +345,6 @@ func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver
 			objcRule: objcRule,
 		},
 	}, filter, nil
-}
-
-// buildFileFilter picks the highest-priority layer that has any include/exclude
-// configured. Priority order: custom (--rule) > project > global.
-func buildFileFilter(layers ...*ProjectRule) *FileFilter {
-	for _, pr := range layers {
-		if pr == nil {
-			continue
-		}
-		if len(pr.Include) == 0 && len(pr.Exclude) == 0 {
-			continue
-		}
-		f := &FileFilter{}
-		for _, p := range pr.Include {
-			f.Include = append(f.Include, strings.ToLower(p))
-		}
-		for _, p := range pr.Exclude {
-			f.Exclude = append(f.Exclude, strings.ToLower(p))
-		}
-		return f
-	}
-	return nil
 }
 
 func loadGlobalRule() (*ProjectRule, error) {
@@ -385,6 +364,9 @@ func loadGlobalRule() (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal global rule: %w", err)
 	}
+	if err := validateRuleConfig(&pr); err != nil {
+		return nil, fmt.Errorf("global rule %s: %w", path, err)
+	}
 	resolveRuleEntries(pr.Rules, filepath.Dir(path), "")
 	return &pr, nil
 }
@@ -398,20 +380,16 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal rule file %s: %w", path, err)
 	}
+	if err := validateRuleConfig(&pr); err != nil {
+		return nil, fmt.Errorf("rule file %s: %w", path, err)
+	}
 	resolveRuleEntries(pr.Rules, filepath.Dir(path), "")
 	return &pr, nil
 }
 
-// loadProjectRule reads <repoDir>/.opencodereview/rule.json. Since #287 anchored
-// RepoDir at the git top-level, `ocr review` from a monorepo subdirectory loads
-// the repo-root rule file — which is consistent, since rule entries match against
-// root-relative diff paths. A subproject-local rule.json under the subdirectory is
-// intentionally not consulted; put shared rules at the repo root, or pass --rule.
-func loadProjectRule(repoDir string) (*ProjectRule, error) {
-	confineRoot, err := pathutil.CanonicalPath(repoDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve repo dir %s: %w", repoDir, err)
-	}
+// Rule files and references must stay inside the directory that supplies the config.
+func loadProjectRuleAt(repoDir string) (*ProjectRule, error) {
+	confineRoot := repoDir
 
 	path := filepath.Join(repoDir, ".opencodereview", "rule.json")
 	resolved, err := filepath.EvalSymlinks(path)
@@ -437,23 +415,16 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal project rule: %w", err)
 	}
+	if err := validateRuleConfig(&pr); err != nil {
+		return nil, fmt.Errorf("project rule %s: %w", path, err)
+	}
 	resolveRuleEntries(pr.Rules, repoDir, confineRoot)
 	return &pr, nil
 }
 
-// Resolve checks each layer in priority order; first match wins. User rules
-// replace the system rule by default; rules with merge_system_rule keep the
-// matched system rule alongside the user rule.
+// Resolve returns the effective rule text after explicit inheritance.
 func (c *composedResolver) Resolve(path string) string {
-	for _, layer := range []*ProjectRule{c.custom, c.project, c.global} {
-		if entry := matchProjectRuleEntry(layer, path); entry != nil {
-			if entry.MergeSystemRule {
-				return c.mergeWithSystemRule(path, entry.Rule)
-			}
-			return entry.Rule
-		}
-	}
-	return c.system.Resolve(path)
+	return c.ResolveDetail(path).Rule
 }
 
 // CanonicalConfig returns a deterministic, order-stable field list describing the
@@ -465,21 +436,14 @@ func (c *composedResolver) Resolve(path string) string {
 // cannot collide once length-prefixed. Order is never sorted — first match wins.
 func (c *composedResolver) CanonicalConfig() []string {
 	var fields []string
-	appendLayer := func(name string, pr *ProjectRule) {
-		if pr == nil {
-			return
-		}
-		for _, e := range pr.Rules {
-			merge := "0"
-			if e.MergeSystemRule {
-				merge = "1"
-			}
-			fields = append(fields, "layer", name, "path", e.Path, "rule", e.Rule, "merge", merge)
+	for _, layer := range c.layers {
+		fields = append(fields, "layer", layer.source, "fallback", strconv.Itoa(layer.fallback))
+		for _, e := range layer.rule.Rules {
+			fields = append(fields, "path", e.Path, "rule", e.Rule,
+				"merge_system", strconv.FormatBool(e.MergeSystemRule),
+				"merge_parent", strconv.FormatBool(e.MergeParentRules))
 		}
 	}
-	appendLayer("custom", c.custom)
-	appendLayer("project", c.project)
-	appendLayer("global", c.global)
 	if c.system != nil {
 		fields = append(fields, c.system.CanonicalConfig()...)
 	}
@@ -503,33 +467,66 @@ func (c *composedResolver) mergeWithSystemRule(path, rule string) string {
 		rule
 }
 
-// ResolveDetail returns the matched rule along with its source layer and pattern.
-// When a user rule sets merge_system_rule, Rule contains the merged system+user
-// rule text while Source and Pattern still describe the user rule that won the
-// priority chain.
+// ResolveDetail retains the source and pattern of the highest-priority match.
 func (c *composedResolver) ResolveDetail(path string) RuleDetail {
-	if detail := c.matchProjectRuleDetail(c.custom, path, "custom"); detail != nil {
-		return *detail
-	}
-	if detail := c.matchProjectRuleDetail(c.project, path, "project"); detail != nil {
-		return *detail
-	}
-	if detail := c.matchProjectRuleDetail(c.global, path, "global"); detail != nil {
-		return *detail
+	for i := 0; i < len(c.layers); i = c.layers[i].fallback {
+		if entry := matchProjectRuleEntry(c.layers[i].rule, path); entry != nil {
+			return c.resolveInheritedRule(path, i, entry)
+		}
 	}
 	return c.system.resolveDetail(path)
 }
 
-func (c *composedResolver) matchProjectRuleDetail(pr *ProjectRule, path, source string) *RuleDetail {
-	entry := matchProjectRuleEntry(pr, path)
-	if entry == nil {
-		return nil
+func (c *composedResolver) resolveInheritedRule(path string, index int, first *ProjectRuleEntry) RuleDetail {
+	var buffer [8]*ProjectRuleEntry
+	entries := append(buffer[:0], first)
+	mergeSystem := first.MergeSystemRule
+	if first.MergeParentRules {
+		for i := index + 1; i < len(c.layers); i++ {
+			entry := matchProjectRuleEntry(c.layers[i].rule, path)
+			if entry == nil {
+				continue
+			}
+			entries = append(entries, entry)
+			mergeSystem = mergeSystem || entry.MergeSystemRule
+			if !entry.MergeParentRules {
+				break
+			}
+		}
 	}
-	rule := entry.Rule
-	if entry.MergeSystemRule {
+	rule := combineUserRules(entries)
+	if mergeSystem {
 		rule = c.mergeWithSystemRule(path, rule)
 	}
-	return &RuleDetail{Rule: rule, Source: source, Pattern: entry.Path}
+	return RuleDetail{Rule: rule, Source: c.layers[index].source, Pattern: first.Path}
+}
+
+func combineUserRules(entries []*ProjectRuleEntry) string {
+	const separator = "\n\n---\n\n"
+	size, count := 0, 0
+	var only string
+	for _, entry := range entries {
+		if entry.Rule != "" {
+			size += len(entry.Rule)
+			count++
+			only = entry.Rule
+		}
+	}
+	if count <= 1 {
+		return only
+	}
+	var text strings.Builder
+	text.Grow(size + (count-1)*len(separator))
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Rule == "" {
+			continue
+		}
+		if text.Len() != 0 {
+			text.WriteString(separator)
+		}
+		text.WriteString(entries[i].Rule)
+	}
+	return text.String()
 }
 
 func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {
@@ -539,7 +536,7 @@ func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {
 	lowerPath := strings.ToLower(path)
 	for i := range pr.Rules {
 		entry := &pr.Rules[i]
-		if entry.Rule == "" && !entry.MergeSystemRule {
+		if entry.Rule == "" && !entry.MergeSystemRule && !entry.MergeParentRules {
 			continue
 		}
 		expanded := expandBraces(entry.Path)
@@ -570,11 +567,16 @@ func looksLikeFilePath(s string) bool {
 }
 
 // resolveRuleEntries reads file references in each rule entry and replaces them with
-// the file content. confineRoot is the canonical repo root for the untrusted project
-// layer (empty for trusted layers, meaning no confinement).
+// the file content. confineRoot limits the project layer to the config's parent
+// directory (empty for trusted layers, meaning no confinement).
 func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string, confineRoot string) {
 	for i := range entries {
 		e := &entries[i]
+		if e.sources != nil {
+			e.Rule = resolveRuleSources(e.sources, repoDir, confineRoot)
+			e.sources = nil
+			continue
+		}
 		if strings.TrimSpace(e.Rule) == "" || !looksLikeFilePath(e.Rule) {
 			continue
 		}
@@ -612,7 +614,7 @@ func tryReadRuleFile(rule string, repoDir string, confineRoot string) *string {
 	// Relative path: resolve against repoDir, validate no traversal.
 	resolved := filepath.Clean(filepath.Join(repoDir, rule))
 	cleanRepo := filepath.Clean(repoDir)
-	if !strings.HasPrefix(resolved, cleanRepo+string(os.PathSeparator)) {
+	if !pathutil.WithinBase(cleanRepo, resolved) {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file path escapes repo dir: %s\n", rule)
 		return nil
 	}

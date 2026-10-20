@@ -12,7 +12,6 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
-	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 // metaCaptureClient records the RequestMeta carried by each request's context.
@@ -114,56 +113,6 @@ func TestExecuteGroupPlanPhase_Identity(t *testing.T) {
 				t.Errorf("meta RequestNo = %d, record = %d", meta.RequestNo, recs[0].RequestNo)
 			}
 		})
-	}
-}
-
-// TestExecuteReviewFilter_Identity is the review-filter counterpart. The filter
-// only runs when comments exist for the file, so one is seeded first.
-func TestExecuteReviewFilter_Identity(t *testing.T) {
-	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
-	collector := tool.NewCommentCollector()
-	collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
-
-	client := &metaCaptureClient{reply: `[]`}
-	a := New(Args{
-		LLMClient:        client,
-		Provider:         "openai",
-		Model:            "test",
-		Session:          sess,
-		CommentCollector: collector,
-		Template: template.Template{
-			ReviewFilterTask: &template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "filter {{comments}} {{path}} {{diff}}"}},
-			},
-			MaxTokens:           10000,
-			MaxToolRequestTimes: 5,
-			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
-		},
-	})
-
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
-
-	meta, ok := client.only(t)
-	if !ok {
-		t.Fatal("review filter request carried no identity")
-	}
-	want := llm.RequestMeta{
-		Provider:  "openai",
-		Model:     "test",
-		FilePath:  "a.go",
-		TaskType:  string(session.ReviewFilterTask),
-		RequestNo: 1,
-	}
-	if meta != want {
-		t.Errorf("meta = %+v, want %+v", meta, want)
-	}
-
-	recs := sess.GetOrCreateFileSession("a.go").TaskRecords[session.ReviewFilterTask]
-	if len(recs) != 1 {
-		t.Fatalf("session holds %d review filter records, want 1", len(recs))
-	}
-	if meta.RequestNo != recs[0].RequestNo {
-		t.Errorf("meta RequestNo = %d, record = %d", meta.RequestNo, recs[0].RequestNo)
 	}
 }
 

@@ -36,7 +36,16 @@ Examples:
   # Custom provider
   ocr config set provider my-gateway
   ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
-  ocr config set custom_providers.my-gateway.protocol openai`,
+  ocr config set custom_providers.my-gateway.protocol openai
+
+  # Native model effort (separate from the effort review preset)
+  ocr config set providers.claude-code.reasoning_effort high
+  ocr config set providers.codex.reasoning_effort xhigh
+  ocr config set providers.codex.reasoning_effort ""
+
+Native CLI releases validate reasoning_effort values and model support.
+HTTP request options use extra_body.
+An omitted or empty reasoning_effort uses the native setting.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -302,17 +311,18 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	APIKey          string            `json:"api_key,omitempty"`
+	APIKeyCmd       string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
+	URL             string            `json:"url,omitempty"`
+	Protocol        string            `json:"protocol,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	Models          []string          `json:"models,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	AuthHeader      string            `json:"auth_header,omitempty"`
+	TimeoutSec      int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody       map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders    map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes      []int             `json:"retry_codes,omitempty"`
 
 	// AWSProfile and AWSRegion pin the credentials and region for providers that
 	// authenticate from the AWS chain (bedrock). Both are optional — without
@@ -798,7 +808,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, reasoning_effort, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses, claude-code-cli, codex-cli\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -840,6 +850,8 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			return fmt.Errorf("invalid model list for %s: %w", key, err)
 		}
 		entry.Models = models
+	case "reasoning_effort":
+		entry.ReasoningEffort = strings.TrimSpace(value)
 	case "auth_header":
 		normalized, err := llm.NormalizeAuthHeader(value)
 		if err != nil {
@@ -887,7 +899,7 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			entry.AWSProfile = normalized
 		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, reasoning_effort, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
 	}
 	return nil
 }
@@ -910,13 +922,13 @@ func parseTimeoutSeconds(value string) (int, error) {
 // The entry's own protocol decides whenever it sets one: a preset's protocol can
 // be overridden per entry (see tryProviderConfig), so `protocol: openai` on the
 // bedrock preset would otherwise still accept AWS settings that nothing reads.
-// Only when the entry is silent does the preset's own AmbientAuth flag answer.
+// The preset protocol decides when the entry has no override.
 func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
 	if entry.Protocol != "" {
 		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
 	}
 	preset, isPreset := llm.LookupProvider(providerName)
-	return isPreset && preset.AmbientAuth
+	return isPreset && preset.Protocol == llm.ProtocolAnthropicBedrock
 }
 
 // normalizeAWSSetting trims the value and rejects the shapes AWS itself will
@@ -1033,7 +1045,7 @@ func setCustomProviderValue(cfg *Config, key, value string) error {
 
 func isAuxiliaryProviderField(field string) bool {
 	switch field {
-	case "extra_body", "extra_headers", "retry_codes", "timeout_sec":
+	case "extra_body", "extra_headers", "retry_codes", "timeout_sec", "reasoning_effort":
 		return true
 	default:
 		return false

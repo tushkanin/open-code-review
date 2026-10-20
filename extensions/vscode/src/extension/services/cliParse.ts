@@ -2,6 +2,7 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import { CliResult, CliRunOptions, LogLine, ReviewComment, ReviewMode } from '@shared/types';
+import { parseVerification, parseVerificationCompletion } from '@shared/verification';
 
 export function buildReviewArgs(opts: CliRunOptions): string[] {
   const args: string[] = ['review'];
@@ -33,6 +34,8 @@ function toComment(raw: any): ReviewComment {
     startLine: raw.start_line,
     endLine: raw.end_line,
     thinking: raw.thinking || undefined,
+    candidateId: typeof raw.candidate_id === 'string' && raw.candidate_id.trim() ? raw.candidate_id : undefined,
+    verification: parseVerification(raw.verification),
   };
 }
 
@@ -46,6 +49,7 @@ export function parseCliResult(stdout: string): CliResult {
     message: json.message,
     comments: Array.isArray(json.comments) ? json.comments.map(toComment) : [],
     warnings: Array.isArray(json.warnings) ? json.warnings : [],
+    verificationCompletion: parseVerificationCompletion(json.verification_completion),
     summary: s ? {
       filesReviewed: s.files_reviewed,
       comments: s.comments,

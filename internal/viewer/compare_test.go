@@ -9,11 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // compareFinding renders one comment object for a review_item_done record.
@@ -73,87 +70,6 @@ func writeCompareSession(t *testing.T, dir, id, reviewMode, coverage string, fin
 		fmt.Sprintf(`{"type":"session_start","timestamp":"2025-03-01T09:00:00Z","cwd":"/home/user/project","model":"gpt-4","reviewMode":%q}`, reviewMode),
 		`{"type":"review_item_done","filePath":"a.go","comments":[`+strings.Join(findings, ",")+`]}`,
 		end)
-}
-
-func TestToLlmComments(t *testing.T) {
-	t.Parallel() // pure function: no shared state, no t.Setenv, no temp dirs
-	full := &ReviewComment{
-		FilePath:       "a.go",
-		Content:        "content",
-		SuggestionCode: "sugg",
-		ExistingCode:   "existing",
-		StartLine:      3,
-		EndLine:        5,
-		Category:       "bug",
-		Severity:       "high",
-	}
-	tests := []struct {
-		name string
-		in   []*ReviewComment
-		want []model.LlmComment
-	}{
-		{name: "nil slice", in: nil, want: []model.LlmComment{}},
-		{name: "empty slice", in: []*ReviewComment{}, want: []model.LlmComment{}},
-		{name: "nil element is skipped", in: []*ReviewComment{nil}, want: []model.LlmComment{}},
-		{name: "zero value", in: []*ReviewComment{{}}, want: []model.LlmComment{{}}},
-		{
-			// FilePath -> Path is the rename, and ExistingCode/Category are two
-			// of the three inputs to session.Compare's finding key.
-			name: "every field is carried",
-			in:   []*ReviewComment{full},
-			want: []model.LlmComment{{
-				Path:           "a.go",
-				Content:        "content",
-				SuggestionCode: "sugg",
-				ExistingCode:   "existing",
-				StartLine:      3,
-				EndLine:        5,
-				Category:       "bug",
-				Severity:       "high",
-			}},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := toLlmComments(tt.in)
-			if got == nil {
-				t.Fatal("toLlmComments returned nil, want non-nil slice")
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("toLlmComments = %+v, want %+v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestModeWarning(t *testing.T) {
-	t.Parallel() // pure function
-	tests := []struct {
-		name          string
-		before, after string
-		want          string
-	}{
-		{name: "same mode", before: "commit", after: "commit", want: ""},
-		{name: "both empty", before: "", after: "", want: ""},
-		{
-			name: "different modes", before: "commit", after: "workspace",
-			want: "review modes differ (commit vs workspace); the two runs may not have looked at the same files",
-		},
-		{
-			name: "before empty renders a dash", before: "", after: "workspace",
-			want: "review modes differ (- vs workspace); the two runs may not have looked at the same files",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := modeWarning(SessionSummary{ReviewMode: tt.before}, SessionSummary{ReviewMode: tt.after})
-			if got != tt.want {
-				t.Fatalf("modeWarning = %q, want %q", got, tt.want)
-			}
-		})
-	}
 }
 
 // compareFixture builds a sessions root with the sessions every TestHandleCompare

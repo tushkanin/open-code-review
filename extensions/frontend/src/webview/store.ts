@@ -80,7 +80,7 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
       return { ...state, logs: [...state.logs, msg.line] };
     case 'reviewDone': {
       const commentJumpable: Record<number, boolean> = {};
-      msg.result.comments.forEach((_, i) => { commentJumpable[i] = true; });
+      msg.result.comments.forEach((_, i) => { commentJumpable[i] = state.commentJumpable[i] ?? true; });
       return {
         ...state,
         session: { ...state.session, result: msg.result },

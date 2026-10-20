@@ -40,10 +40,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`chatgpt`
 改用 `ocr auth login` 创建的 ChatGPT 凭证。
 
+Claude Code 和 Codex 使用原生 CLI 认证，不需要 OCR API key 或 HTTP URL。
+
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `claude-code` | claude-code-cli | — | —（原生 CLI 认证） |
+| `codex` | codex-cli | — | —（原生 CLI 认证） |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | 不适用（Sign in with ChatGPT） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
@@ -73,7 +77,34 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
 `--model` 校验规则。
 
-## ChatGPT 登录预览版
+### 原生推理投入档位
+
+在 `~/.opencodereview/config.json` 的原生 provider 条目中设置 `reasoning_effort`：
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+该值覆盖 Claude 的 `CLAUDE_CODE_EFFORT_LEVEL` 或 Codex 原生配置的 `model_reasoning_effort`。
+省略此字段或将其设为 `""` 可保留原生 CLI 设置。
+支持的值取决于原生 CLI 和所选模型。
+使用 `claude-code-cli` 或 `codex-cli` 的自定义 provider 也支持此字段。
+HTTP provider 使用 `extra_body` 配置模型专属请求选项。
+顶层 `effort` 和 `--effort` 仍控制 OCR 评审轮数，而不是模型推理。
+
+### ChatGPT 登录预览版
 
 此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。
 
@@ -159,9 +190,14 @@ URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个�
 `custom_providers.<name>.<field>` 编辑。名称不能以点开头或结尾、包含连续的点，
 也不能包含空白或仅由空白字符组成的分段。不含点的名称仍支持隐式创建。
 
-任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
-（`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
-`anthropic-bedrock`）：
+任何不在上表中的 provider 名都视为自定义。
+`protocol` 支持 `anthropic`、`openai`、`openai-responses`、
+`anthropic-bedrock`、`claude-code-cli` 和 `codex-cli`。
+`anthropic`、`openai` 和 `openai-responses` 协议要求提供 `url`。
+原生 `claude-code-cli` 和 `codex-cli` 条目要求指定模型。
+它们使用原生 CLI 认证，不需要 OCR 的 `url`、`api_key` 或 `api_key_cmd`。
+
+以下示例使用 HTTP provider。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -335,11 +371,12 @@ ocr review --max-tokens 400000
 ocr scan --max-tokens 120000
 ```
 
-单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
-的默认值。该上限只约束**提示词**：模型的输出上限由单独的
-`MAX_COMPLETION_TOKENS`（默认 `16384`）控制，因此调高 `max_tokens` 不会连带放大
-输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
-可以用 `ocr config unset max_tokens` 恢复为内置默认值。
+单次运行的参数优先级高于 `max_tokens`。
+如果两者都未设置，OCR 会使用内置任务模板的默认值。
+提示词上限与 `MAX_COMPLETION_TOKENS`（两个模板均为 `16384`）相互独立。
+对于原生 Codex，OCR 将该值作为指导信息放入对话记录，不会强制执行原生输出 token 上限。
+提示词上限也与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
+可以用 `ocr config unset max_tokens` 恢复内置默认值。
 
 ### 评审投入档位（effort）
 
@@ -366,19 +403,25 @@ ocr llm test
 
 ### 使用 CC-Switch
 
+以下配置方法仅适用于 HTTP provider。
 如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了
 [路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，
-可以将供应商的 `url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
+可以将 HTTP provider 的 `url` 设为本地代理地址：
 
 ```bash
-# Claude（Anthropic 兼容）
+# Anthropic 兼容的 HTTP provider
 ocr config set providers.anthropic.url http://127.0.0.1:15721
 
-# Codex / OpenAI 兼容 — 将该供应商的 url 键设为代理地址
+# OpenAI 兼容的 HTTP provider
 ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ```
 
-`api_key` 可设置为任意值。`extra_body`（及其他按供应商字段）依然生效。
+对于这些 HTTP provider，`api_key` 可以使用代理接受的任意值。
+`extra_body` 和其他 HTTP 请求字段仍然生效。
+
+原生 Codex 使用自身的 CLI 配置来决定路由和认证。
+OCR 的 `url`、`api_key` 和 `extra_body` 不控制原生 Codex 请求。
+只有当 `codex` 条目明确选择 HTTP 协议（如 `openai-responses`）时，才能使用上述 HTTP 配置方法。
 
 ### 发送厂商专属字段
 

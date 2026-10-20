@@ -175,7 +175,7 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 
 1. **行解決**（worker 内）: `existing_code` をスライディングウィンドウアルゴリズムで diff と照合し、正確な `start_line` / `end_line` を計算します。照合に失敗した場合は両方ともデフォルトで `0` になります。行範囲 `0` は「アンカーされていない」コメントの暗黙のシグナルであり、ユーザーが手動で位置を特定する必要があります（格納されるフラグはありません。下流のコンシューマーが `start_line == 0` をチェックします）。
 2. **再配置タスク** *（任意のフォールバック）*: 行解決がより複雑な diff で失敗したとき、OCR は `RE_LOCATION_TASK` prompt を実行し、モデルにスニペットの再アンカーを依頼します。書き換えられた `existing_code` 文字列に有用です。
-3. **レビューフィルター**: main ループの終了後（worker プールが空になったあと）、`REVIEW_FILTER_TASK` の LLM 呼び出しが、収集されたコメントを diff と照合してチェックし、明らかに誤りと証明できるコメントを削除します。ここでのエラーは記録されたうえで無視されます。
+3. **Verification** — each round drains its workers, persists candidates, and uses a fresh captured-evidence conversation. Errors retain incomplete uncertainty.
 4. **2 回目の行解決**: `Agent.Run` が戻ったあと、トップレベルのコマンドが完全なコメントセットに対して `diff.ResolveLineNumbers` を再実行します（`cmd/opencodereview/review_cmd.go` を参照）。`existing_code` が複数ファイルにまたがる、あるいは再配置ステップで更新されたコメントを捕捉するためです。
 5. **レンダリング**: `--format` に従って text または JSON にレンダリングします。
 
@@ -205,7 +205,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `PLAN_TASK` | plan 段階。チェックリストを生成します。 |
 | `MAIN_TASK` | main レビューループ。`code_comment` 呼び出しを発行します。 |
 | `MEMORY_COMPRESSION_TASK` | compress ゾーンを要約します。 |
-| `REVIEW_FILTER_TASK` | ループ後に、明らかに誤りと証明できるコメントを削除する処理。 |
+| `VERIFICATION_TASK` | Independent captured-evidence investigation with structured candidate-local decisions. |
 | `RE_LOCATION_TASK` | `existing_code` を照合できないコメントを再アンカーします。 |
 
 各 prompt は `{role, prompt_file}` 参照のリストで、テンプレートディレクトリ内の `.md` ファイルを指します（例: `{"role": "system", "prompt_file": "main_task_system.md"}`）。読み込み時に `resolveConversation` がこれらのファイルをメモリ内の `{role, content}` メッセージに読み込み、その後テンプレートのプレースホルダーがグループごとに解決されます:
@@ -217,13 +217,11 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{diffs}}` | 現在のグループに含まれる全ファイルの diff。各ファイルが `<file>` 要素に包まれ、全体が `<review_files>` に入ります。 |
 | `{{file_list}}` | （`GROUPING_TASK` のみ）変更ファイルのメタデータ一覧: パス、状態、`+`/`-` 行数。 |
 | `{{plan_guidance}}` | plan 段階の出力。plan がスキップされた場合は削除されます。 |
-| `{{confirmed_comments}}` | 前のラウンドで確定した指摘。1 ラウンド目は空で削除されます。 |
+| `{{prior_findings}}` | Earlier candidate claims with their actual verification dispositions; empty on round 1. |
 | `{{plan_tools}}` | plan 段階のツール定義のプレーンテキスト（`formatToolDefs` でレンダリング）。`PLAN_TASK` の system prompt に使用されます。 |
 | `{{requirement_background}}` | `--background` または `--background-file` の有効な内容（ファイルが優先）。 |
 | `{{current_system_date_time}}` | 実行時のローカルタイムスタンプ。形式は `YYYY-MM-DD HH:MM`（秒やタイムゾーンなし）。 |
 | `{{context}}` | （圧縮時のみ）要約対象の XML レンダリング済みメッセージ。 |
-| `{{path}}` | グループのキー（グループ内のファイルパスをカンマ区切りで連結）。`REVIEW_FILTER_TASK` に使用されます。 |
-| `{{comments}}` | 蓄積されたコメント（JSON）。`REVIEW_FILTER_TASK` に使用されます。 |
 
 プレースホルダーの置換は [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go) にあります。テンプレート自体は CLI では上書きできません。prompt を変更するには、[`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json) を編集して再ビルドする必要があります。`--tools` 引数は*ツールレジストリ*の上書きです（`internal/config/toolsconfig` が消費する JSON を置き換えます）。テンプレートの上書きではありません。[ツール](../tools/#customizing-tools)を参照してください。
 

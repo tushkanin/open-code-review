@@ -18,6 +18,27 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
 - **Empty / cancelled / failed states**: dedicated views for no issues, user cancellation, and CLI failure (failures are retryable and surface the real error returned by the CLI).
 - **Configuration management**: view / edit the LLM provider config inside the extension (persisted via `ocr config set`).
 - **Model switching / connectivity test**: switch models and test connectivity to the LLM from the status bar.
+- **Verification labels**: sidebar cards and native comments show verification status and the supplied reason separately from the finding.
+
+### Verification results
+
+`Confirmed` identifies a supported, complete verification summary.
+`Uncertain · verification complete` means that the available evidence does not settle the claim.
+`Uncertain · verification incomplete` identifies an interrupted verification.
+`Unverified · verification skipped` identifies an explicit CLI bypass with `--no-filter`.
+Legacy findings and unsupported metadata show `Unverified`.
+
+The verification summary shows complete, incomplete, and skipped candidate counts with supplied reasons.
+These counts can include refuted candidates that do not appear in the published findings.
+The summary stays separate from file coverage, published-finding counts, and the review's terminal state.
+Missing completion data does not imply complete verification.
+
+Verification does not change finding content, reasoning, suggestions, or user action status.
+Equal findings retain separate action states and reasons.
+Long reasons remain available through the card's scroll area.
+Reasons appear as plain text, including text that resembles HTML or editor command links.
+Findings with no native location remain available in the sidebar.
+
 
 ---
 
@@ -39,6 +60,47 @@ A VS Code code-review extension built on the [`open-code-review`](https://www.np
    ```
 
    The config is written to `~/.opencodereview/config.json`.
+
+### Native CLI providers
+
+Select **Claude Code CLI** or **Codex CLI** in the official provider form.
+Install and authenticate `claude` or `codex` through its native configuration.
+The native providers require a model but no OCR API key or HTTP URL.
+The form accepts custom model names and retains saved model choices.
+An HTTP protocol override restores the API-key field.
+Use `ocr config set providers.<name>.url <url>` for a saved URL override.
+Codex supports release `0.162.1` and requires an exact model from its bundled catalog.
+Its suggested model is `gpt-6.1-sol`. Claude's suggested model is `sonnet`.
+OCR controls review scope, prompts, rules, and tool execution.
+See [CLI compatibility and limits](../../internal/llm/CLI_COMPLETIONS.md) for native safety controls and the Codex configuration race limit.
+
+The integration smoke uses the actual OCR binary and both native providers:
+
+```bash
+OCR_INTEGRATION_BINARY=/absolute/path/to/ocr corepack yarn test --runInBand CliService.auth.test.ts
+```
+
+This smoke checks successful and failed drafts, saved configuration isolation, and temporary-home cleanup.
+The runtime proof uses POSIX. It does not establish Windows runtime behavior.
+
+### Draft connection checks
+
+Draft checks use a temporary OCR home and leave the saved configuration unchanged.
+The child process retains `CLAUDE_CONFIG_DIR` and `CODEX_HOME` from the effective shell environment.
+Without an override, it uses `.claude` and `.codex` under the original home.
+The extension does not read or copy CLI credentials.
+The extension removes the temporary OCR home after each check.
+
+To test the launch path with real Claude authentication, run:
+
+```bash
+OCR_IDE_AUTH_SMOKE=1 yarn test --runInBand CliService.auth.test.ts
+```
+
+This opt-in test requires Node.js and an authenticated `claude` CLI on a POSIX system.
+It invokes Claude through the draft child environment, not through the OCR provider registry.
+Executable fixture tests skip Windows because their launcher uses a POSIX shebang.
+The mocked Windows test checks authentication roots and both home variables without a child process.
 
 ---
 
@@ -76,6 +138,11 @@ yarn build        # production build (webpack production; runs automatically bef
 yarn test         # run Jest unit tests
 yarn lint         # ESLint
 yarn package      # produce a distributable .vsix package (see "Build a release package")
+
+# Focused verification regressions
+corepack yarn test --runInBand verificationResult.test.ts verificationComments.test.ts
+# Run from extensions/frontend for shared metadata and occurrence-state checks
+npm test -- --runInBand verification.test.ts
 ```
 
 ### Debugging notes

@@ -22,6 +22,14 @@ type ToolConfigEntry struct {
 //go:embed tools.json
 var defaultToolsJSON []byte
 
+//go:embed verifier_tools.json
+var verifierToolsJSON []byte
+
+// VerifierDefinitions never reads external tool configuration.
+func VerifierDefinitions() []byte {
+	return append([]byte(nil), verifierToolsJSON...)
+}
+
 // Load parses the tools config file. When path is empty, falls back to
 // the embedded default tools configuration.
 func Load(path string) ([]ToolConfigEntry, error) {

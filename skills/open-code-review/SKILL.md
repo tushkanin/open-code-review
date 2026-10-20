@@ -57,9 +57,27 @@ ocr review --audience agent --background "business context here" [user-args]
 | User says | Command to run |
 |-----------|---------------|
 | "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
-| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from main --to <branch>` |
+| "review feature branch" | `ocr review --audience agent -b "context" --from <base-ref> --to <branch>` |
 | "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
+
+**PR/MR URL:**
+
+1. Read the request description and SHAs from the forge in the URL's repository.
+2. For GitLab, use `glab mr view <n> -F json`: take `diff_refs.base_sha`, `diff_refs.head_sha`, and `description`.
+3. For GitHub, use `gh pr view <n> --json baseRefOid,headRefOid,body`; fetch both SHAs from their source repositories.
+4. Fetch both GitLab SHAs too. For GitHub, use `git merge-base <baseRefOid> <headRefOid>` as `<base_sha>`.
+5. Run `ocr review --audience agent --from <base_sha> --to <head_sha> --background "<request description>"`; use literal values with shell-safe quotes.
+6. First add `--preview` and compare its file list with `git diff --stat <base_sha> <head_sha>`.
+
+**Several models:**
+
+- For arguments such as `claude+codex`, map each name through `ocr llm providers`; for example, `claude` maps to `claude-code`.
+- Run one `ocr review … --provider <name> --output <own file>` for each model on the same range and background.
+- Send each run in its own Bash tool call, as parallel tool calls in one response.
+- Write each value directly in each command. Each call needs its own output path; share no shell variables between calls.
+- Tag each finding with its model in the report. Merge duplicate findings and retain all model tags.
+- The reported run uses about 210k tokens per model, or 420k for two models. Actual cost depends on the range.
 
 **Output mode:**
 

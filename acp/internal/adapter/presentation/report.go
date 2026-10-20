@@ -5,6 +5,7 @@
 package presentation
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,14 +23,15 @@ func FormatResult(r *orchestrator.Result, root string) string {
 	var b strings.Builder
 	if r.Review != nil {
 		review := r.Review
-		writeReport(&b, root, "review", review.Status, review.Message, review.Summary, review.Comments, review.Manifest)
+		writeReport(&b, root, "review", review.Status, review.Message, review.Summary, review.Comments, review.Manifest, review.VerificationReport)
+		writeVerificationAudit(&b, review)
 	}
 	if r.Scan != nil {
 		scan := r.Scan
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
-		writeReport(&b, root, "scan", scan.Status, scan.Message, scan.Summary, scan.Comments, nil)
+		writeReport(&b, root, "scan", scan.Status, scan.Message, scan.Summary, scan.Comments, nil, nil)
 	}
 	return b.String()
 }
@@ -63,7 +65,7 @@ func reviewStatus(status string, manifest *contract.Manifest) string {
 	return status
 }
 
-func writeReport(b *strings.Builder, root, operation, status, message string, summary *contract.Summary, comments []contract.Comment, manifest *contract.Manifest) {
+func writeReport(b *strings.Builder, root, operation, status, message string, summary *contract.Summary, comments []contract.Comment, manifest *contract.Manifest, report *contract.VerificationReport) {
 	fmt.Fprintf(b, "## OCR %s · %s\n\n", operation, resultStatus(reviewStatus(status, manifest)))
 	count := int64(len(comments))
 	if manifest != nil && manifest.Coverage != nil && manifest.Coverage.Selected != nil {
@@ -117,6 +119,9 @@ func writeReport(b *strings.Builder, root, operation, status, message string, su
 	}
 	for index, comment := range comments {
 		writeFinding(b, index+1, comment, workspace.ResolveLocation(root, comment.Path, comment.StartLine, comment.EndLine))
+		if operation == "review" {
+			writeFindingVerification(b, comment, report)
+		}
 	}
 	if summary != nil {
 		var usage []string
@@ -208,5 +213,47 @@ func writeFinding(b *strings.Builder, number int, c contract.Comment, location *
 	if c.SuggestionCode != "" {
 		b.WriteString("\n\n**Suggested code (not applied):**\n\n")
 		writeCodeBlock(b, c.Path, c.SuggestionCode)
+	}
+}
+
+func writeFindingVerification(b *strings.Builder, comment contract.Comment, report *contract.VerificationReport) {
+	summary := comment.Verification
+	if summary == nil {
+		b.WriteString("\n\n**Verification: unverified.** No supported verification metadata.")
+	} else {
+		label := "unverified"
+		if report != nil && report.Version != 1 {
+			label = "unverified (unsupported report)"
+		} else if summary.State == "complete" && (summary.Verdict == "confirmed" || summary.Verdict == "uncertain" || summary.Verdict == "refuted") {
+			label = summary.Verdict + " (complete)"
+		} else if summary.State == "incomplete" {
+			label = "uncertain (incomplete)"
+		} else if summary.State == "skipped" {
+			label = "unverified (skipped)"
+		}
+		fmt.Fprintf(b, "\n\n**Verification: %s.** %s: %s", label, markdownLabel(summary.Reason.Code), markdownLabel(summary.Reason.Explanation))
+	}
+	if comment.CandidateID != "" {
+		fmt.Fprintf(b, "\n\nCandidate: %s", markdownLabel(comment.CandidateID))
+	}
+}
+
+func writeVerificationAudit(b *strings.Builder, review *contract.ReviewResult) {
+	if completion := review.VerificationCompletion; completion != nil {
+		fmt.Fprintf(b, "\n\n## Verification completion\n\n%d complete · %d incomplete · %d skipped. Discovery coverage remains separate.", completion.Complete, completion.Incomplete, completion.Skipped)
+		for _, reason := range completion.Reasons {
+			fmt.Fprintf(b, "\n\n%s: %s", markdownLabel(reason.Code), markdownLabel(reason.Explanation))
+		}
+	}
+	if report := review.VerificationReport; report != nil {
+		b.WriteString("\n\n## Complete verification audit\n\nThese records include unpublished claims. They do not increase the finding count.")
+		if report.Version != 1 {
+			b.WriteString("\n\nUnsupported report version. Findings remain unverified.")
+		}
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err == nil {
+			b.WriteString("\n\n")
+			writeCodeBlock(b, "verification.json", string(data))
+		}
 	}
 }

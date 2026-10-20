@@ -191,6 +191,15 @@ are not available from this interface.
   usage and OCR-reported elapsed time, which can differ from the adapter's live
   execution timer. Missing token breakdowns are omitted rather than invented.
   Markdown, syntax highlighting and link rendering depend on the client version.
+- Review findings show their candidate identifiers and verification reasons outside the original finding content.
+  Complete uncertainty, incomplete verification, and skipped bypass remain distinct.
+  Older findings without metadata remain unverified.
+- **Verification completion** counts complete, incomplete, and skipped records separately from discovery coverage and terminal status.
+  Finding counts describe only the delivered `comments` array.
+- **Complete verification audit** contains every delivered candidate, including refuted and interrupted claims.
+  The existing final message includes the complete sanitized report in a structured code block.
+  It retains original claims, support, citations, origins, context identities, provenance, and submitted decisions.
+  Source excerpts can contain sensitive repository data.
 
 For a faster development check, use `/review --effort low` (at most one review round).
 `medium` allows up to two rounds and `high` up to three. A group stops early
@@ -248,6 +257,12 @@ and `start_line == end_line == 0` means a file-level comment. Per-comment
 `thinking` is deliberately not modeled, so reasoning cannot leak by accident.
 `Comment.Severity` and the `status` string are open sets: the observed values
 are declared as `Status*` constants, but consumers must tolerate unknown ones.
+
+Review types also retain optional `candidate_id`, `verification`, `verification_completion`, and the versioned `verification_report`.
+The adapter uses the delivered `comments` list. It does not reconstruct publication or request verification.
+Unknown report versions and status strings remain available as audit data without establishing confirmation.
+Explicit audit claim types exclude `thinking` and provider-private reasoning at every nested boundary.
+Missing metadata does not erase findings. Scans retain their existing presentation.
 
 ## Parsing and Clarification
 

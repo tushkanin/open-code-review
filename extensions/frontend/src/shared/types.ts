@@ -12,6 +12,24 @@ export type ReviewState =
 
 export type CommentStatus = 'pending' | 'applied' | 'discarded' | 'falsePositive';
 
+export interface VerificationReason {
+  code: string;
+  explanation: string;
+}
+
+export interface VerificationSummary {
+  verdict: 'confirmed' | 'refuted' | 'uncertain';
+  state: 'complete' | 'incomplete' | 'skipped';
+  reason: VerificationReason;
+}
+
+export interface VerificationCompletion {
+  complete: number;
+  incomplete: number;
+  skipped: number;
+  reasons: VerificationReason[];
+}
+
 export interface ReviewComment {
   path: string;
   content: string;
@@ -20,6 +38,8 @@ export interface ReviewComment {
   startLine: number;
   endLine: number;
   thinking?: string;
+  candidateId?: string;
+  verification?: VerificationSummary;
 }
 
 export interface ReviewSummary {
@@ -38,11 +58,13 @@ export interface AgentWarning {
 }
 
 export interface CliResult {
-  status: 'success' | 'completed_with_errors' | 'completed_with_warnings' | 'skipped';
+  status: 'success' | 'completed_with_errors' | 'completed_with_warnings' | 'skipped'
+    | 'complete' | 'partial' | 'failed' | 'cancelled';
   comments: ReviewComment[];
   warnings: AgentWarning[];
   summary?: ReviewSummary;
   message?: string;
+  verificationCompletion?: VerificationCompletion;
 }
 
 export interface ProviderEntry {

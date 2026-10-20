@@ -4,6 +4,7 @@
 import { t, resolveLocale, SupportedLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { ReviewComment, CommentStatus, CommentSyncState, ReviewContext, ReviewMode } from '@shared/types';
+import { escapeVerificationText, verificationDisplay } from '@shared/verification';
 import { COMMENT_CONTROLLER_ID } from '@shared/constants';
 import { LineOffsetTracker } from './lineOffset';
 import { GitService } from '../services/GitService';
@@ -128,6 +129,8 @@ export class CommentProvider {
     locateNote?: string,
   ): vscode.MarkdownString {
     let md = locateNote ? `${locateNote}\n\n${c.content}` : c.content;
+    const verification = verificationDisplay(c.verification, (key) => t(this.locale, key));
+    md += `\n\n**${escapeVerificationText(verification.label)}**\n\n${escapeVerificationText(verification.reason)}`;
     if (this.hasSuggestion(c)) {
       md += `\n***\n\`\`\`diff\n${c.suggestionCode}\n\`\`\``;
     } else {

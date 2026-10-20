@@ -19,6 +19,16 @@
 - **Управление настройками**: просмотр и изменение настроек провайдера LLM прямо в расширении (запись через `ocr config set`).
 - **Переключение моделей и проверка связи**: смена модели и проверка соединения с LLM из строки состояния.
 
+### Verification results
+
+Sidebar cards and native comments show verification status and the supplied reason separately.
+Complete uncertainty, incomplete verification, and explicit bypass remain distinct.
+Legacy findings and unsupported metadata remain unverified.
+Verification counts remain separate from file coverage and published-finding counts.
+Verification does not change content, suggestions, or user action status.
+See [verification results and focused checks](README.md#verification-results) for the full contract.
+
+
 ---
 
 ## Требования

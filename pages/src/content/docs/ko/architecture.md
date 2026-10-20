@@ -194,12 +194,9 @@ main 루프는 한 번만 도는 게 아니라 그룹마다 최대 `MAX_REVIEW_R
 | `medium`(기본값) | 2 |
 | `high` | 3 |
 
-두 번째 라운드부터는 앞선 라운드에서 이미 확정된 지적을
-`{{confirmed_comments}}`로 넣어 `MAIN_TASK`를 다시 돌리되, plan은
-**빼고** 돌립니다. 뻔한 문제를 한 번 훑고 나면 plan이 오히려 커버리지 천장
-노릇을 하기 쉽기 때문입니다. 라운드는 새로 나온 지적이 없거나,
-확정 코멘트 상한에 닿았거나, 누적 토큰 예산(`--max-tokens-budget`)이 바닥나면
-일찍 멈춥니다.
+Each later round receives earlier claims and their actual dispositions through `{{prior_findings}}`.
+Later rounds omit the plan.
+Rounds stop when no new candidate appears, the candidate cap is reached, or the aggregate token budget is exhausted.
 
 ## 메모리 압축 {#memory-compression}
 
@@ -283,9 +280,7 @@ main 도구 호출 루프가 후처리 때문에 멈춰 서는 일이 없습니�
    실패하면 OCR이 `RE_LOCATION_TASK` 프롬프트를 돌려 모델에게 해당 코드
    조각을 다시 짚어 달라고 요청합니다. `existing_code`가 원문 그대로가 아니라
    조금 바꿔 쓰인 경우에 쓸모가 있습니다.
-3. **리뷰 필터** — main 루프가 끝나고 워커 풀이 비면 `REVIEW_FILTER_TASK` LLM
-   호출로 모인 코멘트를 diff와 대조해 틀렸음이 분명한 것을 걷어 냅니다.
-   여기서 나는 오류는 기록만 하고 넘어갑니다.
+3. **Verification** — each round drains its workers, persists candidates, and uses a fresh captured-evidence conversation. Errors retain incomplete uncertainty.
 4. **라인 해석 두 번째 패스** — `Agent.Run`이 반환되고 나면 최상위 명령이
    코멘트 전체를 대상으로 `diff.ResolveLineNumbers`를 다시 돌립니다
    (`cmd/opencodereview/review_cmd.go` 참고). `existing_code`가 여러 파일에
@@ -324,7 +319,7 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 | `PLAN_TASK` | 계획 단계. 체크리스트를 만듭니다. |
 | `MAIN_TASK` | main 리뷰 루프. `code_comment` 호출을 내보냅니다. |
 | `MEMORY_COMPRESSION_TASK` | 압축 구역을 요약합니다. |
-| `REVIEW_FILTER_TASK` | 루프가 끝난 뒤 틀렸음이 분명한 코멘트를 걷어 냅니다. |
+| `VERIFICATION_TASK` | Independent captured-evidence investigation with structured candidate-local decisions. |
 | `RE_LOCATION_TASK` | `existing_code`를 맞추지 못한 코멘트의 위치를 다시 짚습니다. |
 
 프롬프트는 저마다 `{role, prompt_file}` 참조 목록이고, 이 참조는 템플릿
@@ -339,14 +334,12 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 | `{{change_files}}` | 이 그룹 *바깥*에 있는 PR의 변경 파일 전체의 상태와 경로. |
 | `{{diffs}}` | 그룹의 diff. 파일 하나당 XML 요소 하나. |
 | `{{plan_guidance}}` | plan 단계의 출력. plan을 건너뛰었거나 2라운드 이후면 제거됩니다. |
-| `{{confirmed_comments}}` | 앞선 리뷰 라운드에서 확정된 지적(1라운드에서는 비어 있음). |
+| `{{prior_findings}}` | Earlier candidate claims with their actual verification dispositions; empty on round 1. |
 | `{{plan_tools}}` | plan 단계 도구 정의를 평문으로 렌더링한 것(`formatToolDefs`). `PLAN_TASK` 시스템 프롬프트에 쓰입니다. |
 | `{{requirement_background}}` | `--background` 또는 `--background-file`로 정해진 실제 배경(파일 쪽이 우선). |
 | `{{current_system_date_time}}` | 실행 시각의 로컬 타임스탬프. `YYYY-MM-DD HH:MM` 형식(초·시간대 없음). |
 | `{{file_list}}` | (그룹화 전용) 파일 메타데이터 — 경로, 상태, `+/-` 줄 수. |
 | `{{context}}` | (압축 전용) 요약할 메시지를 XML로 렌더링한 것. |
-| `{{path}}` | 그룹 키(정렬된 경로를 쉼표로 이은 것). `REVIEW_FILTER_TASK`에 쓰입니다. |
-| `{{comments}}` | 그때까지 모인 코멘트(JSON). `REVIEW_FILTER_TASK`에 쓰입니다. |
 
 플레이스홀더 치환 코드는
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)에

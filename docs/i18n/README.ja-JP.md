@@ -100,6 +100,13 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 - **シナリオに最適化されたプロンプト** — コードレビュー向けに深く最適化されたプロンプトテンプレートにより、効果を高めつつトークン消費を削減します。
 - **シナリオに最適化されたツールセット** — 大規模な本番データにおけるツール呼び出しトレースの詳細な分析 — 呼び出し頻度の分布、ツールごとの繰り返し率、新しいツールが呼び出しチェーン全体に与える影響など — から抽出された、汎用エージェントツールキットよりもコードレビューにおいて安定的で予測可能な専用ツールセットです。
 
+Diff reviews verify each candidate against captured repository evidence.
+OCR publishes confirmed and uncertain findings, with explicit uncertainty reasons.
+It retains refuted findings in the complete session report.
+`--no-filter` bypasses verification and labels every finding as unverified.
+JSON and SARIF expose the complete report separately from published findings.
+Use `ocr session export --json -o review.json` to export saved findings and their complete report.
+
 ## 使い方
 
 ### 前提条件
@@ -136,6 +143,20 @@ ocr config model             # アクティブなプロバイダーのモデル�
 CLIセットアップ、環境変数、カスタムプロバイダーなどの高度な設定については、[設定ガイド](https://open-codereview.ai/docs/configuration)を参照してください。
 
 **2. レビュー**
+
+OCR-managed diff reviews use fixed repository evidence for each run.
+Range and commit reviews use resolved commits.
+OCR-managed diff reviews ignore Git replacement refs during capture and later evidence access.
+Workspace reviews capture local changes, including context outside the selected files.
+Later file edits or branch changes do not change built-in file reads, searches, file lookup, or captured diff reads.
+Search uses captured Git attributes and diff driver settings to classify text and binary content.
+Search also preserves Git's `diff.<driver>.binary=auto` setting.
+Attribute pathspecs use the captured attribute states, including values and exclusions.
+Search commands share the existing Git process limit.
+
+The staged fallback uses index content when it supplies the reviewed diff.
+Unavailable or inconsistent content remains unavailable instead of using an older version.
+Full-file scans and host-managed delegation keep their current behavior.
 
 ```bash
 cd your-project

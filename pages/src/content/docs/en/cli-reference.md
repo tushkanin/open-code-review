@@ -114,7 +114,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
-| `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
+| `--no-filter` | — | `false` | Bypass verification. Retain every candidate as skipped and uncertain, with a verification-disabled reason. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
@@ -133,6 +133,25 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |
+
+Diff reviews verify new candidates after each discovery round.
+The verifier reads the same captured repository state as discovery.
+It uses the group's deadline, concurrency slot, provider, model, and aggregate token budget.
+Normal output includes confirmed and uncertain findings.
+Only evidence-backed refutation removes a finding from publication.
+Uncertain findings show a reason without changes to severity, category, source location, or suggested fixes.
+
+JSON retains the published `comments` array.
+Each published finding adds `candidate_id` and `verification`.
+The versioned `verification_report` retains every original candidate, decision, citation, and provenance.
+`verification_completion` counts complete, incomplete, and skipped candidates separately from discovery coverage.
+SARIF uses per-result properties for metadata and run properties for the complete report.
+Its visible messages include uncertainty reasons.
+
+Provider failures, invalid decisions, cancellation, and exhausted limits preserve undecided claims as incomplete uncertainty.
+Accepted decisions remain intact.
+Persistence failures remain visible and prevent affected checkpoints from reuse.
+
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
@@ -233,9 +252,10 @@ would review the same thing the parent did:
   against. After file dispatch begins, Ctrl-C cancels the review gracefully and
   records one, so completed checkpoints remain resumable. A process killed
   before graceful shutdown and sessions older than run manifests do not have one
-- only files the parent's manifest settled are reused. A checkpoint the manifest
-  does not account for, or one that is unreadable, costs that file its
-  checkpoint and nothing more — it is simply reviewed again
+- only files the parent's manifest settles can participate in reuse
+- reuse also requires matching captured evidence, complete group membership, diffs, rules, background, verifier contracts, and verification mode
+- valid incomplete candidates receive recheck without new identifiers or loss of completed decisions
+- invalid group context, legacy checkpoints, and corrupt verification data require fresh group review
 - `--preview` and `--resume` cannot be used together
 
 A rejected resume writes nothing: no session, no manifest, no LLM call.
@@ -494,17 +514,33 @@ ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
 
+Default HTML export shows the same supported published findings and complete verification audit as the live viewer.
+Uncertain findings show their reasons. Completion counts distinguish complete, incomplete, and skipped verification from discovery coverage.
+Expand each audit record for its original claim, support, citations, origins, context identity, provenance, and submitted decisions.
+Refuted claims remain in the audit but not in the finding count.
+Recovery warnings remain visible. Invalid metadata cannot confirm or suppress claims.
+Filters, pagination, and independent review marks work offline.
+
+Use `ocr session export --json -o review.json` for saved findings and the complete verification report.
+This interface includes refuted and interrupted candidates.
+Session detail also exposes the complete report.
+Session comments and comparisons retain their array and bucket shapes, with verification metadata beside original finding fields.
+Legacy and recoverable claims remain readable as unverified findings.
+Session commands retain readable legacy checkpoints even when they lack reuse fingerprints.
+
+
 With no session id the newest session for the repository is exported. That is
 the default because a *successful* `ocr review` never prints its session id.
 Without `-o` the HTML goes to stdout.
 
-The exported page embeds the reviewed source excerpts the session recorded, so
-treat the file with the same care as the repository itself before publishing it.
+The exported page embeds saved reasoning and source excerpts, including evidence outside the changed lines.
+Treat the file as sensitive repository data before you share it.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose session should be exported. |
 | `--output <path>`, `-o` | stdout | Write the HTML to a file instead of stdout. |
+| `--json` | `false` | Export saved findings and the complete verification report instead of HTML. |
 
 ### `ocr session rm`
 

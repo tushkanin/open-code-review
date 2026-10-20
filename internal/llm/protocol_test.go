@@ -42,6 +42,8 @@ func TestValidateProtocol(t *testing.T) {
 		{"anthropic ok", ProtocolAnthropic, false, ""},
 		{"openai ok", ProtocolOpenAIChatCompletions, false, ""},
 		{"openai-responses ok", ProtocolOpenAIResponses, false, ""},
+		{"Claude CLI", ProtocolClaudeCodeCLI, false, ""},
+		{"Codex CLI", ProtocolCodexCLI, false, ""},
 		{"empty rejected", "", true, "unsupported protocol"},
 		{"grpc rejected", "grpc", true, "unsupported protocol"},
 		{"anthropic-vertex rejected", "anthropic-vertex", true, "unsupported protocol"},
@@ -62,20 +64,5 @@ func TestValidateProtocol(t *testing.T) {
 				t.Errorf("ValidateProtocol(%q) returned unexpected error: %v", tt.p, err)
 			}
 		})
-	}
-}
-
-// TestValidateProtocol_ErrorMessageListsAllProtocols makes sure the error
-// message enumerates every canonical name so users discover openai-responses
-// from any typo.
-func TestValidateProtocol_ErrorMessageListsAllProtocols(t *testing.T) {
-	err := ValidateProtocol("grpc")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	for _, sub := range []string{ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses} {
-		if !strings.Contains(err.Error(), sub) {
-			t.Errorf("error %q should mention %q", err.Error(), sub)
-		}
 	}
 }

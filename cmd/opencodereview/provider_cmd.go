@@ -240,9 +240,7 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 // command as unset, so without this a command of "   " would satisfy the check
 // here and then fail resolution with "no api_key or api_key_cmd configured".
 //
-// Ambient-auth and external-auth providers have no credential to save here:
-// their credentials come from the environment chain or a dedicated token store
-// rather than the config file.
+// Ambient and external authentication use credentials outside the OCR config.
 func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool, entry ProviderEntry) error {
 	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
 		return nil
@@ -265,9 +263,9 @@ func providerUsesExternalCredentials(preset llm.Provider, entry ProviderEntry) b
 		return true
 	}
 	if entry.Protocol != "" {
-		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
+		return llm.UsesAmbientAuth(llm.NormalizeProtocol(entry.Protocol))
 	}
-	return preset.AmbientAuth || llm.NormalizeProtocol(preset.Protocol) == llm.ProtocolAnthropicBedrock
+	return llm.UsesAmbientAuth(llm.NormalizeProtocol(preset.Protocol))
 }
 
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
@@ -280,6 +278,9 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	}
 
 	preset, isPreset := llm.LookupProvider(result.provider)
+	if protocol := cfg.Providers[result.provider].Protocol; protocol != "" {
+		preset.Protocol = llm.NormalizeProtocol(protocol)
+	}
 
 	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset, cfg.Providers[result.provider]); err != nil {
 		return err

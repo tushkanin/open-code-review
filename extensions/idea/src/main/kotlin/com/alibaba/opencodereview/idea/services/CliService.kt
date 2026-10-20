@@ -225,6 +225,14 @@ class CliService(private val cliPath: String = "ocr") {
     fun testConnection(home: File? = null): Pair<Boolean, String?> {
         val envExtra = buildMap {
             home?.let {
+                val originalEnv = ShellEnv.env()
+                val originalHome = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+                    originalEnv["USERPROFILE"] ?: originalEnv["HOME"] ?: System.getProperty("user.home")
+                } else {
+                    originalEnv["HOME"] ?: System.getProperty("user.home")
+                }
+                put("CLAUDE_CONFIG_DIR", originalEnv["CLAUDE_CONFIG_DIR"] ?: File(originalHome, ".claude").path)
+                put("CODEX_HOME", originalEnv["CODEX_HOME"] ?: File(originalHome, ".codex").path)
                 put("HOME", it.absolutePath)
                 put("USERPROFILE", it.absolutePath)
             }

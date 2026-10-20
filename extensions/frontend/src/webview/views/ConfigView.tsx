@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, isValidProviderName, listCustomProviderNames } from '../../shared/configUtils';
-import { mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../../shared/providers';
+import { isCLIProtocol, mergeModelLists, PROVIDER_PRESETS, usesAmbientAuth } from '../../shared/providers';
 import { EnvCheckResult, LogLine, OcrConfig } from '../../shared/types';
 import { CliStatus, ConnTest } from '../configStore';
 import { CustomProviderManager } from '../components/CustomProviderManager';
@@ -411,10 +411,13 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
         )}
       </FormItem>
 
+      {isCLIProtocol(savedEntry?.protocol?.trim().toLowerCase() || preset.protocol) && (
+        <div class="form-hint">{t('view.config.nativeCLIAuth')}</div>
+      )}
       {!ambientAuth && (
         <FormItem
           label={t('view.config.apiKey')}
-          hint={`${t('view.config.apiKeyEnvHint')} ${preset.envVar}`}
+          hint={preset.envVar ? `${t('view.config.apiKeyEnvHint')} ${preset.envVar}` : undefined}
         >
           <PasswordInput
             value={apiKey}

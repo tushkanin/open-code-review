@@ -38,10 +38,14 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 대부분은 API 키가 필요하며, `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다. `chatgpt`는 대신 `ocr auth login`이 만든 ChatGPT 자격 증명을 사용합니다.
 
+Claude Code와 Codex는 네이티브 CLI 인증을 사용합니다. OCR API 키나 HTTP URL은 필요하지 않습니다.
+
 | 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `claude-code` | claude-code-cli | — | — (네이티브 CLI 인증) |
+| `codex` | codex-cli | — | — (네이티브 CLI 인증) |
 | `chatgpt` | openai-responses | `https://api.openai.com/v1` | 해당 없음 (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
@@ -72,7 +76,34 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
 
-## ChatGPT 로그인 미리보기
+### 네이티브 추론 강도 {#native-reasoning-effort}
+
+`~/.opencodereview/config.json`의 각 네이티브 프로바이더 항목에 `reasoning_effort`를 설정하세요:
+
+```json
+{
+  "provider": "claude-code",
+  "providers": {
+    "claude-code": {
+      "model": "sonnet",
+      "reasoning_effort": "high"
+    },
+    "codex": {
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+이 값은 Claude의 `CLAUDE_CODE_EFFORT_LEVEL` 또는 Codex의 네이티브 `model_reasoning_effort` 설정을 재정의합니다.
+필드를 생략하거나 `""`로 설정하면 네이티브 CLI 설정을 유지합니다.
+지원하는 값은 네이티브 CLI와 선택한 모델에 따라 다릅니다.
+`claude-code-cli` 또는 `codex-cli`를 사용하는 커스텀 프로바이더도 같은 필드를 지원합니다.
+HTTP 프로바이더는 모델별 요청 옵션에 `extra_body`를 사용합니다.
+최상위 `effort`와 `--effort`는 모델 추론이 아니라 OCR 리뷰 라운드 수를 제어합니다.
+
+### ChatGPT 로그인 미리보기
 
 이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
 
@@ -141,7 +172,14 @@ Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습�
 
 `mimo-v2.6-flash`, `foo.api_key`처럼 점이 포함된 이름을 사용할 수 있습니다. 새로운 이름에 점이 있다면 필드를 설정하기 전에 `ocr config set provider <name>`으로 생성하고 선택하세요. 이 명령은 현재 프로바이더를 변경합니다. 기존 항목은 선택하지 않고도 `providers.<name>.<field>` 또는 `custom_providers.<name>.<field>`로 수정할 수 있습니다. 이름의 처음이나 끝에 점이 있거나, 점이 연속되거나, 구분된 부분이 비어 있거나 공백으로만 구성된 이름은 허용되지 않습니다. 점이 없는 이름은 필드 설정 시 계속 자동으로 생성됩니다.
 
-위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
+위 표에 없는 프로바이더 이름은 커스텀으로 취급합니다.
+`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock`,
+`claude-code-cli`, `codex-cli`를 지원합니다.
+`anthropic`, `openai`, `openai-responses` 프로토콜에는 `url`이 필요합니다.
+네이티브 `claude-code-cli`와 `codex-cli` 항목에는 모델이 필요합니다.
+이 항목은 네이티브 CLI 인증을 사용하며 OCR의 `url`, `api_key`, `api_key_cmd`는 필요하지 않습니다.
+
+다음 예시는 HTTP 프로바이더를 사용합니다:
 
 ```bash
 ocr config set provider                             my-gateway

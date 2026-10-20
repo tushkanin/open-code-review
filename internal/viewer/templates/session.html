@@ -46,6 +46,17 @@
 </div>
 {{end}}
 
+{{if .Session.ManagedReview}}
+<section class="token-summary" aria-label="Verification completion">
+    <h3>Verification</h3>
+    <p>{{.Session.VerificationCompletion.Complete}} complete · {{.Session.VerificationCompletion.Incomplete}} incomplete · {{.Session.VerificationCompletion.Skipped}} skipped</p>
+    <p>Verification does not change discovery coverage.</p>
+    {{range .Session.VerificationCompletion.Reasons}}<p>{{.Code}}: {{.Explanation}}</p>{{end}}
+    {{if .Session.VerificationError}}<p role="alert">Verification audit error: {{.Session.VerificationError}}. Saved findings remain unverified.</p>{{end}}
+    {{if not .Session.VerificationReport.Records}}<p>No saved verification records. Historical findings remain unverified.</p>{{end}}
+</section>
+{{end}}
+
 <div class="token-summary">
     <h3>Token Usage</h3>
     <div class="token-stats">
@@ -167,6 +178,7 @@
                     {{if .StartLine}}<span class="comment-lines{{if $numbered}} sr-only{{end}}">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
                     <span class="comment-badge mark-chip" data-mark-chip hidden></span>
                 </div>
+                {{if .Verification}}<p class="verification-status" data-candidate-id="{{.CandidateID}}"><strong>{{if eq .Verification.Reason.Code "unverified_session"}}Unverified{{else if eq .Verification.State "skipped"}}Unverified (skipped){{else if eq .Verification.State "incomplete"}}Uncertain (incomplete){{else}}{{.Verification.Verdict}} ({{.Verification.State}}){{end}}</strong> — {{.Verification.Reason.Code}}: {{.Verification.Reason.Explanation}}{{if .CandidateID}} <code>{{.CandidateID}}</code>{{end}}</p>{{end}}
                 <div class="comment-content">{{.Content}}</div>
                 {{if or .ExistingCode .SuggestionCode}}
                 <div class="comment-code-diff">
@@ -199,6 +211,21 @@
     {{template "pager" (dict "prefix" "comments" "label" "Review comment pages")}}
     <p class="comment-filter-empty" data-comment-filter-empty role="status" hidden>No comments match this filter.</p>
 </div>
+{{end}}
+
+{{if .Session.VerificationReport.Records}}
+<section class="token-summary" id="verification-audit" aria-label="Complete verification audit">
+    <h3>Complete verification audit</h3>
+    <p>These records include unpublished claims. Review marks apply only to published findings.</p>
+    <p>Report version: {{.Session.VerificationReport.Version}}</p>
+    {{range .Session.VerificationReport.Records}}
+    <details class="verification-record" data-candidate-id="{{.Candidate.ID}}">
+        <summary><code>{{.Candidate.ID}}</code> — {{.Verdict}} ({{.State}}): {{.Reason.Explanation}}</summary>
+        <p>{{.Candidate.Finding.Content}}</p>
+        <pre><code>{{structuredDetails .}}</code></pre>
+    </details>
+    {{end}}
+</section>
 {{end}}
 
 {{if .Session.Summary.FilesReviewed}}

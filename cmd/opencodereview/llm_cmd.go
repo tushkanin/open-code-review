@@ -151,6 +151,8 @@ func runLLMTestWithConfigPath(configPath string) error {
 		} else {
 			fmt.Printf("Profile: (from the ambient AWS chain)\n")
 		}
+	} else if llm.IsCLIProtocol(ep.Protocol) {
+		fmt.Printf("Transport: %s\n", ep.Protocol)
 	} else {
 		fmt.Printf("URL:    %s\n", ep.URL)
 	}

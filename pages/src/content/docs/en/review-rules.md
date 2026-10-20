@@ -16,13 +16,31 @@ path, the layers are tried in order; the first matching pattern wins.
 | Priority    | Source         | Path                                  | Notes                                     |
 | ----------- | -------------- | ------------------------------------- | ----------------------------------------- |
 | 1 (highest) | `--rule` flag  | user-specified                        | CLI override; always wins when supplied.  |
-| 2           | Project config | `<repoDir>/.opencodereview/rule.json` | Per-project rules — safe to commit.       |
+| 2           | Project configs | `.opencodereview/rule.json` at or above the Git repository root | Nearest first; ancestor inheritance is opt-in. |
 | 3           | Global config  | `~/.opencodereview/rule.json`         | User-wide preferences.                    |
 | 4 (lowest)  | System default | embedded `system_rules.json`          | Built-in rules covering common languages. |
 
-If a higher-priority layer's file doesn't exist, it's silently skipped —
-not an error. So a project that never adds `.opencodereview/rule.json`
-just falls through to the global / system layers.
+OCR loads project configs from the Git repository root up to the filesystem root.
+By default, only the nearest project config participates. If it has no matching
+rule, OCR skips farther project configs and tries the global layer.
+Explicit inheritance enables the ancestor layers. Invalid configs return an error.
+
+OCR loads the home config once, as the global layer, even when home is an ancestor.
+
+> **Trust boundary:** OCR does not check ownership or write permissions for ancestor configs.
+> A config in a shared directory, such as `/tmp`, can change review rules and file filters.
+> Project rule references can read allowed files anywhere inside the supplying ancestor directory.
+> Configs above your home directory have higher priority than the global config.
+> An invalid or unreadable ancestor config can stop the review, even when that config does not participate.
+> OCR has no option to disable ancestor discovery.
+
+Rule patterns and include/exclude patterns still match repository-relative paths.
+Relative rule file references resolve from the directory that contains
+`.opencodereview`. Config files and rule references must stay inside that
+directory after OCR resolves symlinks.
+
+If OCR finds no project config, it uses the global and system layers.
+The `--rule` layer keeps the highest priority.
 
 The system layer is **always** present (it ships in the binary), so there
 is always _some_ rule resolved.
@@ -46,7 +64,7 @@ is always _some_ rule resolved.
 }
 ```
 
-Three independent fields:
+Top-level fields:
 
 - `include` — optional. Glob patterns that _bypass_ built-in default
   exclude patterns (test-file exclusions — see below). It is not a
@@ -58,13 +76,17 @@ Three independent fields:
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
+- `filter_mode` — optional. Use `"merge"` to inherit lower-priority filters
+  or `"replace"` to stop inheritance. See [User-layer inheritance](#user-layer-inheritance).
 
-Each `rules` entry also accepts an optional third field:
+Each `rules` entry also accepts these optional fields:
 
 - `merge_system_rule` — optional, defaults to `false`. When `false`
   (the default), a matching entry **replaces** the built-in system rule
   for that file. When `true`, the matched system rule is kept and the
   user rule is **combined** with it.
+- `merge_parent_rules` — optional, defaults to `false`. When `true`, OCR
+  includes matching rules from lower-priority user layers.
 
 ```json
 {
@@ -111,15 +133,100 @@ Two things are worth knowing about how the merge is assembled:
   the system rule alone. In neither case is the other half replaced by a
   placeholder.
 
-The field is read from all three user layers — `--rule`, the project's
-`.opencodereview/rule.json`, and `~/.opencodereview/rule.json`. Layer
-priority is unchanged: the first matching entry still wins, and a
-matching layer still shadows the layers below it.
+All user layers accept `merge_system_rule`. Without `merge_parent_rules`,
+the first matching user layer replaces lower-priority user layers.
+Within each config, only the first matching entry participates.
+`merge_system_rule` does not merge user layers.
 
-The limitation to keep in mind: merging reaches the **system** layer
-only. If two of your own entries match the same file, the first one
-still wins outright — `merge_system_rule` does not combine them with
-each other.
+### Multiple sources for one rule
+
+The `rule` value accepts a string or an array of strings. Array items can mix
+inline text and file references:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.go",
+      "rule": [
+        "review/account-isolation.md",
+        "review/retry-safety.md",
+        "Check field permissions."
+      ],
+      "merge_parent_rules": true,
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+OCR resolves each item separately and combines its text in array order.
+One array supplies several checks for the same path. Multiple matching entries
+in one config still use first-match behavior.
+
+- File references use the same detection and safety checks as string values.
+  Allowed extensions are `.md`, `.txt`, and `.markdown`. Each file has a 512 KB limit.
+- Project references resolve from the directory that contains `.opencodereview`.
+  Global and `--rule` references resolve from the directory that contains their JSON file.
+- Missing or unsafe references produce warnings. OCR omits those sources but keeps valid sources.
+- OCR skips empty and whitespace-only array items.
+- An empty array or an array with no effective text lets the next entry match,
+  unless `merge_parent_rules` or `merge_system_rule` is enabled.
+- Array items must be strings. Numbers, objects, nested arrays, and `null` items return a config error.
+- Each layer's array order remains intact during parent inheritance. Built-in rules still appear at most once.
+
+
+### User-layer inheritance
+
+Rule text and file filters have separate inheritance controls:
+
+```json
+{
+  "filter_mode": "merge",
+  "exclude": ["**/generated/**"],
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Check account isolation and record permissions.",
+      "merge_parent_rules": true,
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+**Rule text**
+
+- A matching `merge_parent_rules: true` entry enables the next lower-priority user layers.
+- OCR skips layers with no matching entry during inheritance.
+- Each matching parent's flag controls whether inheritance continues. A matching
+  entry with `merge_parent_rules: false` stops the chain.
+- OCR combines non-empty text from lower to higher priority.
+- If any participating entry enables `merge_system_rule`, OCR adds the built-in rule once.
+  `merge_parent_rules` alone does not add built-in rules.
+- An empty entry can inherit rules. If no user text matches and no participating
+  entry enables `merge_system_rule`, its effective rule text is empty.
+- `ocr rules check` reports the source and pattern of the highest-priority matching entry.
+
+For a repository under `~/Projects/gearheart`, the user-layer order is:
+`--rule`, repository config, Gearheart config, other ancestor configs, global config.
+To combine global, Gearheart, and repository rules, both project entries must enable
+`merge_parent_rules`.
+
+**File filters**
+
+- With no `filter_mode`, OCR selects the first layer with non-empty filter lists.
+  That layer replaces lower filters. Empty default configs use the same
+  nearest-project-to-global fallback as rule text.
+- `"merge"` includes the current lists and enables lower-priority layers.
+  An empty merge config still enables inheritance.
+- During inheritance, OCR skips empty default configs. A default config with
+  filters or an explicit `"replace"` config stops the chain after its lists.
+- An explicit `"replace"` config with empty lists clears inherited user filters.
+- OCR normalizes patterns to lowercase and removes duplicates from each list.
+  User exclusions still take precedence over inclusions.
+- Built-in secret exclusions remain unconditional.
+- Values other than `"merge"`, `"replace"`, or an empty string return an error.
 
 ### Glob features
 

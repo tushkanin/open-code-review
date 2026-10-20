@@ -197,6 +197,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
 	}
+	var resumeAdmission *session.ResumeRequest
+	if sealed != nil {
+		resumeAdmission = &session.ResumeRequest{Identity: sealed.Identity, Provider: rt.Provider, Model: rt.Model, ProviderExplicit: opts.provider != "", ModelExplicit: opts.model != ""}
+	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
 	fileReader := &tool.FileReader{
@@ -237,6 +241,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		ResumeAdmission:       resumeAdmission,
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
@@ -513,13 +518,14 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 	tpl.MaxTokens = maxTokens
 
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		Template:   tpl,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:        cc.RepoDir,
+		From:           opts.from,
+		To:             opts.to,
+		Commit:         opts.commit,
+		Template:       tpl,
+		FileFilter:     cc.FileFilter,
+		GitRunner:      cc.GitRunner,
+		ManagedPreview: true,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

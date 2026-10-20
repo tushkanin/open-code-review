@@ -86,6 +86,25 @@ func (r *Runner) RunSplit(ctx context.Context, repoDir string, args ...string) (
 	return stdout.String(), stderr.String(), err
 }
 
+// RunIO holds a process slot while the caller streams input and bounded output.
+func (r *Runner) RunIO(ctx context.Context, repoDir string, env []string, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
+	if err := r.acquire(ctx); err != nil {
+		return err
+	}
+	defer r.release()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoDir
+	cmd.Env = env
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
 // Stream acquires the semaphore, starts a git command, and passes its stdout
 // as an io.Reader to consume. The semaphore is held for the full duration.
 // consume MUST fully drain the stdout reader before returning nil;

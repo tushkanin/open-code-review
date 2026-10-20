@@ -110,7 +110,8 @@ The detail page is the interesting one. It shows:
 |---|---|
 | `plan_task` | The plan phase ran (largest file ≥ `PLAN_MODE_LINE_THRESHOLD`, or 2+ files totalling ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`). |
 | `main_task` | Every group. The main review loop — one pass per review round. |
-| `review_filter_task` | The post-review comment-filtering pass ran for this group. |
+| `verification_task` | The verifier inspects captured evidence after discovery. |
+| `review_filter_task` | A historical session contains a filter transcript. This transcript does not establish a verification decision. |
 | `memory_compression_task` | The active+compress zone exceeded 60 % / 80 % budget. |
 | `re_location_task` | A `code_comment` couldn't be anchored, fallback re-location ran. |
 
@@ -179,14 +180,34 @@ inspect the JSONL transcript directly (the `messages` field on each
 
 ## Review comments
 
-Below the task lanes, the session page lists every finding the review
-produced as **comment cards**, grouped by file, showing the comment
-text, its existing/suggested code where present, and severity/category
-badges. Chips on the filter bar narrow the list by severity or category.
+The session page shows published findings as **comment cards**, grouped by file.
+Each card retains the original content, existing code, suggested code, severity, and category.
+Supported saved decisions retain confirmed and uncertain findings. Only trusted refutations suppress findings.
+Uncertain cards show their verdict, execution state, and reason separately from their content.
+Skipped verification and historical findings remain unverified.
+Chips on the filter bar select a severity or category.
 Twenty comments fit on a page; the pager stays hidden when there is
 only one. Changing a severity or category filter returns to page 1;
 marking a finding, toggling **Hide marked**, or clearing marks keeps
 the current page where it still exists.
+
+### Verification and the complete audit
+
+The **Verification** section counts complete, incomplete, and skipped records separately from discovery coverage.
+A complete investigation can remain uncertain. An interruption leaves incomplete verification.
+`--no-filter` produces skipped verification with an explicit reason.
+
+The **Complete verification audit** section contains every saved candidate, including refuted and interrupted claims.
+Expand a record to read its complete structured details.
+These details include original claims, candidate identifiers, reasons, support, citations, origins, context identities, provenance, and submitted decisions.
+A refutation-only session has no published findings but retains this audit.
+The finding count excludes unpublished audit records.
+
+The viewer uses saved-session replay, not the current repository, to interpret decisions.
+An audit error appears as a warning. Usable claims remain available without trusted confirmation or suppression.
+Legacy, pathless, and fingerprint-less claims remain readable.
+Default HTML export uses the same findings and audit. Its filters, pagination, and marks work without network access.
+
 
 ### Marking findings as you fix them
 
@@ -213,6 +234,9 @@ read-only:
   for the site starts it over.
 - Re-running a review of the same change produces a new session, which
   starts unmarked.
+Equal claims have separate candidate and mark identities.
+Surviving checkpoint occurrences retain their existing mark keys.
+Recovered candidates without a checkpoint use their candidate identifiers.
 
 ## Use cases
 
@@ -229,11 +253,10 @@ that request number in the JSONL transcript (its `messages` field).
 
 ### "Why was this file silent?"
 
-A file with **no comments** is a successful review only if the model
-*deliberately* called `task_done`. If the lane shows tool calls but no
-`code_comment`, that's an intentional clean review. If the lane ends in
-an error card, it's a failure dressed up as silence — surface it as a
-warning.
+Discovery coverage shows whether the review completes each file.
+The verification audit can explain why a completed file has no published findings.
+For example, a caller guard can refute every candidate in that file.
+An empty finding list alone does not prove complete discovery or complete verification.
 
 ### "What did compression keep / drop?"
 
@@ -278,6 +301,8 @@ The JSONL transcripts contain **everything** sent to and received from
 the LLM, including any code that was in the diff. They live entirely on
 your machine inside `~/.opencodereview/`. OCR does not upload them
 anywhere.
+The complete audit can include saved reasoning and source excerpts outside the changed lines.
+HTML exports contain this saved evidence too. Treat these files as sensitive repository data.
 
 If your reviews include code you wouldn't want stored long-term,
 either:

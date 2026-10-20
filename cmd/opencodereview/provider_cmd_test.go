@@ -579,3 +579,28 @@ func TestApplyOfficialProviderConfig_IgnoresURLFromResult(t *testing.T) {
 		t.Errorf("persisted URL = %q, want existing URL %q", got, wantURL)
 	}
 }
+
+func TestNativeProviderSetup(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	for _, name := range []string{"claude-code", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			cfg := &Config{Providers: map[string]ProviderEntry{name: {}}}
+			if err := applyOfficialProviderConfig(path, cfg, providerTUIResult{provider: name, model: "custom-model"}); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Providers[name].Model != "custom-model" || cfg.Provider != name {
+				t.Fatalf("native save: %+v", cfg)
+			}
+			entry := cfg.Providers[name]
+			if providerAcceptsAWSSettings(name, &entry) {
+				t.Fatal("native provider accepts AWS fields")
+			}
+			entry.Protocol = "openai"
+			cfg.Providers[name] = entry
+			if err := applyOfficialProviderConfig(path, cfg, providerTUIResult{provider: name, model: "custom-model"}); err == nil {
+				t.Fatal("HTTP override accepts no credential")
+			}
+		})
+	}
+}

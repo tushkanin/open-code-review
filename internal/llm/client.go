@@ -7,6 +7,8 @@
 //   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
+//   - "claude-code-cli" — Claude Code CLI completions
+//   - "codex-cli" — Codex CLI completions
 package llm
 
 import (
@@ -398,9 +400,10 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL                   string            // Full API endpoint URL
-	APIKey                string            // Bearer token / API key
-	Model                 string            // Default model override
+	URL                   string // Full API endpoint URL
+	APIKey                string // Bearer token / API key
+	Model                 string // Default model override
+	ReasoningEffort       string
 	AuthHeader            string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
 	Timeout               time.Duration     // Request timeout
 	ExtraBody             map[string]any    // Vendor-specific fields merged into every request body
@@ -472,6 +475,8 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol dispatch (canonical names from protocol.go):
 //   - ProtocolAnthropic ("anthropic") -> AnthropicClient
 //   - ProtocolOpenAIResponses ("openai-responses") -> OpenAIResponsesClient
+//   - ProtocolClaudeCodeCLI ("claude-code-cli") -> ClaudeCodeClient
+//   - ProtocolCodexCLI ("codex-cli") -> CodexClient
 //   - ProtocolOpenAIChatCompletions ("openai") or anything else -> OpenAIClient
 //
 // The defensive default keeps legacy callers that somehow bypass resolver
@@ -488,6 +493,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		URL:                   ep.URL,
 		APIKey:                ep.Token,
 		Model:                 ep.Model,
+		ReasoningEffort:       ep.ReasoningEffort,
 		AuthHeader:            ep.AuthHeader,
 		Timeout:               ep.Timeout,
 		ExtraBody:             ep.ExtraBody,
@@ -503,6 +509,10 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		AWSRegion:             ep.AWSRegion,
 	}
 	switch ep.Protocol {
+	case ProtocolClaudeCodeCLI:
+		return NewClaudeCodeClient(cfg)
+	case ProtocolCodexCLI:
+		return NewCodexClient(cfg)
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
 	case ProtocolAnthropicBedrock:

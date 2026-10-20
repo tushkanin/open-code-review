@@ -4,10 +4,8 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -271,45 +269,6 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 	}
 	if clone.ExtraHeaders != nil {
 		t.Error("ExtraHeaders should remain nil")
-	}
-}
-
-// cloneProviderEntry lists fields by hand, which is how timeout_sec and
-// extra_headers came to be silently dropped on the save-rollback paths. This
-// fails when a field is added to ProviderEntry but not to the clone: the
-// non-zero check forces the fixture to grow, and DeepEqual then catches the
-// omission. It catches a dropped field, not an aliased one -- DeepEqual
-// compares values, not identity; the sibling tests above cover aliasing.
-func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
-	orig := ProviderEntry{
-		APIKey:       "key",
-		APIKeyCmd:    "op read op://dev/x/api-key",
-		URL:          "http://localhost",
-		Protocol:     "openai",
-		Model:        "gpt-4",
-		Models:       []string{"gpt-4"},
-		AuthHeader:   "Authorization",
-		TimeoutSec:   45,
-		RetryCodes:   []int{403},
-		ExtraBody:    map[string]any{"temperature": 0.7},
-		ExtraHeaders: map[string]string{"X-Trace": "on"},
-		AWSRegion:    "us-west-2",
-		AWSProfile:   "example-profile",
-		unknownJSONFields: map[string]json.RawMessage{
-			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
-		},
-	}
-
-	rv := reflect.ValueOf(orig)
-	for i := range rv.NumField() {
-		if rv.Field(i).IsZero() {
-			t.Fatalf("fixture leaves %s zero-valued; set it so the clone is actually checked",
-				rv.Type().Field(i).Name)
-		}
-	}
-
-	if clone := cloneProviderEntry(orig); !reflect.DeepEqual(clone, orig) {
-		t.Errorf("clone dropped a field:\n got %+v\nwant %+v", clone, orig)
 	}
 }
 

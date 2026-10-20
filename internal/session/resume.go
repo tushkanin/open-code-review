@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/alibaba/open-code-review/internal/model"
+	v "github.com/alibaba/open-code-review/internal/verification"
 )
 
 // ResumeState is the replayed, read-only checkpoint index for one prior session.
@@ -41,40 +43,46 @@ type ResumeState struct {
 	// interrupted parent apart from one that closed with nothing to verify.
 	Closed bool
 
-	// reusable caches the parent manifest's completed and reused fingerprints,
-	// built on first use by ReusableItem. Reuse is decided on one goroutine
-	// before any dispatch begins, so this needs no lock.
-	reusable map[string]bool
+	// Group workers share this immutable index after its first initialization.
+	reusableOnce sync.Once
+	reusable     map[string]bool
+	verification verificationState
+	displayOrder []string
+	displayed    map[string]bool
+	legacyItems  []ResumeItem
 }
 
 // ResumeItem is a completed file-level checkpoint, keyed by diff fingerprint.
 type ResumeItem struct {
-	FilePath    string
-	OldPath     string
-	NewPath     string
-	Fingerprint string
-	Comments    []model.LlmComment
+	FilePath     string
+	OldPath      string
+	NewPath      string
+	Fingerprint  string
+	Comments     []model.LlmComment
+	Verification *VerificationBinding
 }
 
 type resumeRecord struct {
-	Type            string             `json:"type"`
-	SessionID       string             `json:"sessionId"`
-	Cwd             string             `json:"cwd"`
-	GitBranch       string             `json:"gitBranch"`
-	Model           string             `json:"model"`
-	ReviewMode      string             `json:"reviewMode"`
-	DiffFrom        string             `json:"diffFrom"`
-	DiffTo          string             `json:"diffTo"`
-	DiffCommit      string             `json:"diffCommit"`
-	ScanPaths       *[]string          `json:"scanPaths"`
-	FilePath        string             `json:"filePath"`
-	OldPath         string             `json:"oldPath"`
-	NewPath         string             `json:"newPath"`
-	Fingerprint     string             `json:"fingerprint"`
-	SourceSessionID string             `json:"sourceSessionId"`
-	Error           string             `json:"error"`
-	Comments        []model.LlmComment `json:"comments"`
-	RunManifest     *RunManifest       `json:"run_manifest"`
+	Type              string             `json:"type"`
+	SessionID         string             `json:"sessionId"`
+	Cwd               string             `json:"cwd"`
+	GitBranch         string             `json:"gitBranch"`
+	Model             string             `json:"model"`
+	ReviewMode        string             `json:"reviewMode"`
+	DiffFrom          string             `json:"diffFrom"`
+	DiffTo            string             `json:"diffTo"`
+	DiffCommit        string             `json:"diffCommit"`
+	ScanPaths         *[]string          `json:"scanPaths"`
+	FilePath          string             `json:"filePath"`
+	OldPath           string             `json:"oldPath"`
+	NewPath           string             `json:"newPath"`
+	Fingerprint       string             `json:"fingerprint"`
+	SourceSessionID   string             `json:"sourceSessionId"`
+	Error             string             `json:"error"`
+	Comments          []model.LlmComment `json:"comments"`
+	RunManifest       *RunManifest       `json:"run_manifest"`
+	Verification      json.RawMessage    `json:"verification,omitempty"`
+	VerificationError string             `json:"verification_error,omitempty"`
 }
 
 // SessionFilePath returns the JSONL path for a persisted session.
@@ -118,24 +126,39 @@ func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeSt
 		return nil, fmt.Errorf("open resume session %q: %w", sessionID, err)
 	}
 	defer f.Close()
+	return replayResumeState(f, repoDir, sessionID, skipUnparseable)
+}
+
+// ReplayReviewSession reads the selected archive without a repository or home lookup.
+func ReplayReviewSession(reader io.Reader, sessionID string) (*ResumeState, error) {
+	return replayResumeState(reader, "", sessionID, true)
+}
+
+func replayResumeState(input io.Reader, repoDir, sessionID string, skipUnparseable bool) (*ResumeState, error) {
 
 	state := &ResumeState{
 		SessionID: sessionID,
 		RepoDir:   repoDir,
 		Items:     make(map[string]ResumeItem),
 	}
-	reader := bufio.NewReader(f)
+	reader := bufio.NewReader(input)
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if readErr == io.EOF {
 			// Bytes returned alongside EOF have no trailing newline: they are an
 			// unterminated record from a torn write. Drop and stop without parsing.
+			if len(line) > 0 {
+				state.verification.fail(fmt.Errorf("torn session record prevents verification reuse"))
+			}
 			break
 		}
 
 		if len(line) > 0 {
-			if err := state.applyResumeLine(line); err != nil && !skipUnparseable {
-				return nil, err
+			if err := state.applyResumeLine(line); err != nil {
+				state.verification.fail(err)
+				if !skipUnparseable {
+					return nil, err
+				}
 			}
 		}
 
@@ -156,35 +179,65 @@ func (s *ResumeState) applyResumeLine(line []byte) error {
 	if err := json.Unmarshal(line, &rec); err != nil {
 		return fmt.Errorf("parse resume session %q: %w", s.SessionID, err)
 	}
+	hasVerification := len(rec.Verification) > 0 && string(rec.Verification) != "null"
+	if (strings.HasPrefix(rec.Type, "verification_") || hasVerification) && rec.SessionID != s.SessionID {
+		return fmt.Errorf("verification record belongs to another session")
+	}
 
 	switch rec.Type {
+	case "verification_capture", "verification_decision", "verification_terminal":
+		return s.applyVerification(rec.Type, rec.Verification)
 	case "session_start":
 		s.applySessionStart(rec)
 	case "review_item_done", "review_item_reused":
-		if rec.Fingerprint == "" {
-			return nil
-		}
 		filePath := rec.FilePath
 		if filePath == "" {
 			filePath = rec.NewPath
 		}
-		s.Items[rec.Fingerprint] = ResumeItem{
+		item := ResumeItem{
 			FilePath:    filePath,
 			OldPath:     rec.OldPath,
 			NewPath:     rec.NewPath,
 			Fingerprint: rec.Fingerprint,
 			Comments:    copyLlmComments(rec.Comments),
 		}
+		if hasVerification {
+			var binding VerificationBinding
+			if err := json.Unmarshal(rec.Verification, &binding); err != nil || !s.verification.bindingValid(&binding) {
+				s.verification.fail(fmt.Errorf("invalid verification checkpoint binding"))
+			}
+			item.Verification = &binding
+		}
+		if rec.Fingerprint == "" {
+			s.legacyItems = append(s.legacyItems, item)
+			s.displayOrder = append(s.displayOrder, "")
+			return nil
+		}
+		if s.displayed == nil {
+			s.displayed = make(map[string]bool)
+		}
+		if !s.displayed[rec.Fingerprint] {
+			s.displayed[rec.Fingerprint] = true
+			s.displayOrder = append(s.displayOrder, rec.Fingerprint)
+		}
+		s.Items[rec.Fingerprint] = item
 	case "review_item_failed":
 		if rec.Fingerprint != "" {
 			delete(s.Items, rec.Fingerprint)
 		}
 	case "session_end":
 		s.Closed = true
+		if rec.VerificationError != "" {
+			s.verification.fail(fmt.Errorf("verification persistence failed: %s", rec.VerificationError))
+		}
 		// Last one wins: a session file holds at most one session_end, but
 		// replaying a truncated write should not clear an earlier good one.
 		if rec.RunManifest != nil {
 			s.Manifest = rec.RunManifest
+		}
+	default:
+		if strings.HasPrefix(rec.Type, "verification_") {
+			return fmt.Errorf("unsupported verification event %q", rec.Type)
 		}
 	}
 	return nil
@@ -229,6 +282,36 @@ func (s *ResumeState) Item(fingerprint string) (ResumeItem, bool) {
 		return ResumeItem{}, false
 	}
 	item.Comments = copyLlmComments(item.Comments)
+	if item.Verification != nil {
+		binding := *item.Verification
+		binding.Revisions = append([]VerificationRevision{}, binding.Revisions...)
+		item.Verification = &binding
+		if s.verification.bindingValid(&binding) {
+			result := v.ResultFromReport(s.verification.report(binding.ContextID))
+			item.Comments = verificationComments(result, item.FilePath)
+		} else {
+			contextID := ""
+			// An intact stream validates the checkpoint context before later revisions can make its binding stale.
+			if s.verification.invalid == nil {
+				contextID = binding.ContextID
+			}
+			remaining := make(map[model.LlmComment]int, len(item.Comments))
+			for _, comment := range item.Comments {
+				remaining[comment]++
+			}
+			for _, record := range s.verification.report(contextID).Records {
+				finding := record.Candidate.Finding
+				if finding.Path != item.FilePath && (finding.Path != "" || record.Candidate.Origin.Checkpoint != item.FilePath) {
+					continue
+				}
+				if remaining[finding] > 0 {
+					remaining[finding]--
+				} else {
+					item.Comments = append(item.Comments, finding)
+				}
+			}
+		}
+	}
 	return item, true
 }
 
@@ -245,9 +328,9 @@ func (s *ResumeState) ReusableItem(fingerprint string) (ResumeItem, bool) {
 	if s == nil || s.Manifest == nil {
 		return ResumeItem{}, false
 	}
-	if s.reusable == nil {
+	s.reusableOnce.Do(func() {
 		s.reusable = manifestReusableFingerprints(s.Manifest)
-	}
+	})
 	if !s.reusable[fingerprint] {
 		return ResumeItem{}, false
 	}

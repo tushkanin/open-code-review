@@ -161,6 +161,16 @@ make build              # пишет dist/opencodereview (dist/opencodereview.ex
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
+В Linux и macOS можно собрать текущую копию исходников и установить её в `$HOME/.local/bin`:
+
+```bash
+sh install.sh --local
+```
+
+Задайте `OCR_INSTALL_DIR`, чтобы выбрать другой каталог установки.
+Скрипт собирает бинарный файл во временном каталоге и не изменяет `dist/`.
+Он не скачивает релиз.
+
 #### Сборка под другую платформу
 
 ```bash

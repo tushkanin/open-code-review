@@ -114,7 +114,7 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | Целевая ссылка, на которой заканчивается diff (например, `feature-branch`). Если задана, OCR вычисляет `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Один коммит для ревью (сравнивается с родительским). |
 | `--preview` | `-p` | `false` | Запускает конвейер фильтрации, но пропускает LLM. Выводит список файлов и причины исключения. Учитывает `--format json`; `--format sarif` не поддерживается (в предпросмотре нет завершённых находок для вывода). |
-| `--no-filter` | — | `false` | Сохраняет все комментарии ревью и пропускает вызов LLM постобработки `REVIEW_FILTER_TASK` для каждой подзадачи. Подзадача проверяет один файл или набор связанных файлов. |
+| `--no-filter` | — | `false` | Bypass verification. Retain every candidate as skipped and uncertain, with a verification-disabled reason. |
 | `--resume <session-id>` | — | — | Возобновляет предыдущую совместимую сессию ревью диапазона или коммита. |
 | `--format <fmt>` | `-f` | `text` | `text` (для чтения человеком), `json` (машиночитаемый массив комментариев) или `sarif` (отчёт SARIF 2.1.0 для GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Запись результатов ревью в файл UTF-8 (`-` означает stdout). Файл создаётся лениво при первой записи, поэтому неудачные запуски не затрагивают существующие файлы. В текстовом формате цветовые коды ANSI удаляются автоматически. |
@@ -481,6 +481,16 @@ ocr session compare --json <before-session-id> <after-session-id>
 ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
+
+`ocr session export --json -o review.json` exports saved findings and the complete verification report.
+The report includes refuted and interrupted candidates.
+Review JSON adds `candidate_id` and `verification` beside original finding fields.
+Its separate `verification_report` retains every candidate.
+SARIF uses result properties for metadata and run properties for the report.
+Text and SARIF identify uncertainty and its reason.
+Full-context resume preserves valid decisions and rechecks incomplete candidates.
+Invalid group context, legacy data, and corrupt verification data require fresh group review.
+
 
 Без id сессии экспортируется самая свежая сессия репозитория. Такое
 поведение выбрано по умолчанию, потому что успешный `ocr review` не печатает

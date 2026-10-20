@@ -15,6 +15,16 @@ export type SupportedLocale = 'en' | 'zh-cn' | 'ja-jp' | 'ko-kr' | 'ru-ru';
 
 const messages: Record<SupportedLocale, Record<string, string>> = {
   en: {
+    'verification.confirmed': 'Confirmed',
+    'verification.uncertain': 'Uncertain · verification complete',
+    'verification.incomplete': 'Uncertain · verification incomplete',
+    'verification.skipped': 'Unverified · verification skipped',
+    'verification.unverified': 'Unverified',
+    'verification.unavailable': 'Verification information is unavailable.',
+    'verification.summary': 'Verification',
+    'verification.countComplete': 'complete',
+    'verification.countIncomplete': 'incomplete',
+    'verification.countSkipped': 'skipped',
     // ── IdleView ──
     'view.idle.configFirst': 'Configure model first',
     'view.idle.reviewing': 'Reviewing…',
@@ -74,6 +84,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.config.customModel': 'Enter custom model…',
     'view.config.apiKey': 'API Key',
     'view.config.apiKeyEnvHint': 'Also available via env var',
+    'view.config.nativeCLIAuth': 'Authentication uses the native CLI configuration.',
     'view.config.apiKeySaved': 'Saved (leave blank to keep)',
     'view.config.testing': 'Testing connection…',
     'view.config.testOk': '✓ Connected',
@@ -175,6 +186,16 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
   },
 
   'zh-cn': {
+    'verification.confirmed': '已确认',
+    'verification.uncertain': '不确定 · 验证完成',
+    'verification.incomplete': '不确定 · 验证未完成',
+    'verification.skipped': '未验证 · 已跳过验证',
+    'verification.unverified': '未验证',
+    'verification.unavailable': '验证信息不可用。',
+    'verification.summary': '验证',
+    'verification.countComplete': '已完成',
+    'verification.countIncomplete': '未完成',
+    'verification.countSkipped': '已跳过',
     'view.idle.configFirst': '请先配置模型',
     'view.idle.reviewing': '审查中…',
     'view.idle.selectBranch': '请选择对比分支',
@@ -227,6 +248,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.config.customModel': '输入自定义模型…',
     'view.config.apiKey': 'API 密钥',
     'view.config.apiKeyEnvHint': '也可通过环境变量',
+    'view.config.nativeCLIAuth': '身份验证使用原生 CLI 配置。',
     'view.config.apiKeySaved': '已保存（留空保持不变）',
     'view.config.testing': '正在测试连接…',
     'view.config.testOk': '✓ 连接成功',
@@ -320,6 +342,16 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
   },
 
   'ja-jp': {
+    'verification.confirmed': '確認済み',
+    'verification.uncertain': '不確実 · 検証完了',
+    'verification.incomplete': '不確実 · 検証未完了',
+    'verification.skipped': '未検証 · 検証をスキップ',
+    'verification.unverified': '未検証',
+    'verification.unavailable': '検証情報はありません。',
+    'verification.summary': '検証',
+    'verification.countComplete': '完了',
+    'verification.countIncomplete': '未完了',
+    'verification.countSkipped': 'スキップ',
     // ── IdleView ──
     'view.idle.configFirst': '先にモデルを設定してください',
     'view.idle.reviewing': 'レビュー中…',
@@ -379,6 +411,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.config.customModel': 'カスタムモデルを入力…',
     'view.config.apiKey': 'API キー',
     'view.config.apiKeyEnvHint': '環境変数でも設定できます',
+    'view.config.nativeCLIAuth': '認証にはネイティブ CLI の設定を使用します。',
     'view.config.apiKeySaved': '保存済み（空欄なら変更しません）',
     'view.config.testing': '接続をテスト中…',
     'view.config.testOk': '✓ 接続できました',
@@ -480,6 +513,16 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
   },
 
   'ko-kr': {
+    'verification.confirmed': '확인됨',
+    'verification.uncertain': '불확실 · 검증 완료',
+    'verification.incomplete': '불확실 · 검증 미완료',
+    'verification.skipped': '미검증 · 검증 생략',
+    'verification.unverified': '미검증',
+    'verification.unavailable': '검증 정보가 없습니다.',
+    'verification.summary': '검증',
+    'verification.countComplete': '완료',
+    'verification.countIncomplete': '미완료',
+    'verification.countSkipped': '생략',
     // ── IdleView ──
     'view.idle.configFirst': '먼저 모델을 설정하세요',
     'view.idle.reviewing': '검토 중…',
@@ -539,6 +582,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.config.customModel': '사용자 지정 모델 입력…',
     'view.config.apiKey': 'API 키',
     'view.config.apiKeyEnvHint': '환경 변수로도 설정할 수 있습니다',
+    'view.config.nativeCLIAuth': '인증은 기본 CLI 구성을 사용합니다.',
     'view.config.apiKeySaved': '저장됨(비워 두면 유지)',
     'view.config.testing': '연결을 테스트하는 중…',
     'view.config.testOk': '✓ 연결되었습니다',
@@ -640,6 +684,16 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
   },
 
   'ru-ru': {
+    'verification.confirmed': 'Подтверждено',
+    'verification.uncertain': 'Неопределённо · проверка завершена',
+    'verification.incomplete': 'Неопределённо · проверка не завершена',
+    'verification.skipped': 'Не проверено · проверка пропущена',
+    'verification.unverified': 'Не проверено',
+    'verification.unavailable': 'Сведения о проверке недоступны.',
+    'verification.summary': 'Проверка',
+    'verification.countComplete': 'завершено',
+    'verification.countIncomplete': 'не завершено',
+    'verification.countSkipped': 'пропущено',
     // ── IdleView ──
     'view.idle.configFirst': 'Сначала настройте модель',
     'view.idle.reviewing': 'Проверка…',
@@ -699,6 +753,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'view.config.customModel': 'Введите свою модель…',
     'view.config.apiKey': 'API-ключ',
     'view.config.apiKeyEnvHint': 'Также задаётся переменной окружения',
+    'view.config.nativeCLIAuth': 'Аутентификация использует конфигурацию CLI.',
     'view.config.apiKeySaved': 'Сохранено (оставьте пустым, чтобы не менять)',
     'view.config.testing': 'Проверка подключения…',
     'view.config.testOk': '✓ Подключено',
