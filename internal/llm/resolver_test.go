@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/chatgptauth"
 )
 
 func TestStripModelSuffix(t *testing.T) {
@@ -1407,10 +1409,25 @@ func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel
 	const model = "unlisted-model-for-test"
 	for _, provider := range ListProviders() {
 		t.Run(provider.Name, func(t *testing.T) {
+			entry := providerEntryConfig{APIKey: "test-key", AWSRegion: "us-west-2"}
+			var credentialCalls int
+			if provider.Name == "chatgpt" {
+				entry = providerEntryConfig{}
+				oldCredentials, oldModels := chatGPTCredentials, chatGPTModels
+				t.Cleanup(func() { chatGPTCredentials, chatGPTModels = oldCredentials, oldModels })
+				chatGPTCredentials = func(context.Context, string) (*chatgptauth.Auth, error) {
+					credentialCalls++
+					return &chatgptauth.Auth{ClientID: "account-fixture", AccessToken: "siwc-fixture"}, nil
+				}
+				chatGPTModels = func(context.Context, *chatgptauth.Auth) ([]chatgptauth.Model, error) {
+					t.Fatal("explicit ChatGPT model queried the catalog")
+					return nil, nil
+				}
+			}
 			path, _ := writeResolverConfig(t, configFile{
 				Provider: provider.Name,
 				Providers: map[string]providerEntryConfig{
-					provider.Name: {APIKey: "test-key", AWSRegion: "us-west-2"},
+					provider.Name: entry,
 				},
 			})
 			var ep ResolvedEndpoint
@@ -1421,7 +1438,11 @@ func TestResolveEndpointWithModelOverride_AllBuiltInProvidersAcceptUnlistedModel
 			if err != nil || ep.Model != model || ep.Provider != provider.Name {
 				t.Fatalf("endpoint = %+v, error = %v", ep, err)
 			}
-			if strings.Count(stderr, "[ocr] WARNING: model") != 1 || !strings.Contains(stderr, fmt.Sprintf("for provider %q", provider.Name)) {
+			if provider.Name == "chatgpt" {
+				if credentialCalls != 1 || !ep.ChatGPTPlan || !ep.RequiresStreaming || !ep.RejectsSamplingParams || ep.URL != chatgptauth.Resource || ep.Token != "siwc-fixture" || ep.ChatGPTAccount != "account-fixture" || stderr != "" {
+					t.Fatalf("endpoint = %+v, credential calls = %d, stderr = %q", ep, credentialCalls, stderr)
+				}
+			} else if strings.Count(stderr, "[ocr] WARNING: model") != 1 || !strings.Contains(stderr, fmt.Sprintf("for provider %q", provider.Name)) {
 				t.Errorf("stderr = %q, want one warning for %s", stderr, provider.Name)
 			}
 		})
@@ -2924,17 +2945,17 @@ func TestNativeProviderResolution(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "helper-ran")
 			entry := providerEntryConfig{Model: "free-text-model", APIKeyCmd: "echo ran > " + marker}
 			cfg := configFile{Provider: name, Model: "global-model", Providers: map[string]providerEntryConfig{name: entry}}
-			ep, ok, err := tryProviderConfig(cfg, "")
+			ep, ok, err := tryProviderConfig(cfg, "", context.Background())
 			if err != nil || !ok || ep.Model != "free-text-model" || !ep.AmbientAuth {
 				t.Fatalf("native resolution: %+v %v %v", ep, ok, err)
 			}
-			ep, _, err = tryProviderConfig(cfg, "flag-model")
+			ep, _, err = tryProviderConfig(cfg, "flag-model", context.Background())
 			if err != nil || ep.Model != "flag-model" {
 				t.Fatalf("flag precedence: %+v %v", ep, err)
 			}
 			entry.Protocol = ProtocolOpenAIChatCompletions
 			cfg.Providers[name] = entry
-			if _, _, err := tryProviderConfig(cfg, ""); err == nil || !strings.Contains(err.Error(), "requires a url") {
+			if _, _, err := tryProviderConfig(cfg, "", context.Background()); err == nil || !strings.Contains(err.Error(), "requires a url") {
 				t.Fatalf("missing HTTP URL: %v", err)
 			}
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -2944,7 +2965,7 @@ func TestNativeProviderResolution(t *testing.T) {
 			entry.APIKey = "fixture-key"
 			entry.APIKeyCmd = ""
 			cfg.Providers[name] = entry
-			ep, _, err = tryProviderConfig(cfg, "")
+			ep, _, err = tryProviderConfig(cfg, "", context.Background())
 			if err != nil || ep.AmbientAuth || ep.Token != "fixture-key" || ep.URL != entry.URL {
 				t.Fatalf("HTTP override: %+v %v", ep, err)
 			}

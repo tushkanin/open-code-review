@@ -158,6 +158,9 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	if result.provider == "" {
 		return fmt.Errorf("provider name is required")
 	}
+	if err := validateProviderName(result.provider); err != nil {
+		return err
+	}
 	model := result.resolvedModel()
 	if model == "" {
 		return fmt.Errorf("model is required")
@@ -237,13 +240,13 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 // command as unset, so without this a command of "   " would satisfy the check
 // here and then fail resolution with "no api_key or api_key_cmd configured".
 //
-// Ambient protocols use native authentication instead of an OCR credential.
-func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
+// Ambient and external authentication use credentials outside the OCR config.
+func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool, entry ProviderEntry) error {
 	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
 		return nil
 	}
 	switch {
-	case llm.UsesAmbientAuth(preset.Protocol):
+	case isPreset && providerUsesExternalCredentials(preset, entry):
 		return nil
 	case isPreset && preset.EnvVar != "":
 		if os.Getenv(preset.EnvVar) == "" {
@@ -253,6 +256,16 @@ func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.P
 	default:
 		return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", providerName, providerName)
 	}
+}
+
+func providerUsesExternalCredentials(preset llm.Provider, entry ProviderEntry) bool {
+	if preset.ExternalAuth {
+		return true
+	}
+	if entry.Protocol != "" {
+		return llm.UsesAmbientAuth(llm.NormalizeProtocol(entry.Protocol))
+	}
+	return llm.UsesAmbientAuth(llm.NormalizeProtocol(preset.Protocol))
 }
 
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
@@ -269,7 +282,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		preset.Protocol = llm.NormalizeProtocol(protocol)
 	}
 
-	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
+	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset, cfg.Providers[result.provider]); err != nil {
 		return err
 	}
 

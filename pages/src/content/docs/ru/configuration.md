@@ -41,18 +41,20 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### Встроенные провайдеры
 
 Перечисленные ниже провайдеры поставляются вместе с OCR; для них заранее
-заданы базовый URL и протокол, поэтому после выбора достаточно указать
-API-ключ. Если `providers.<name>.api_key` не задан, OCR использует
-соответствующую переменную окружения.
+заданы базовый URL и протокол. Большинству нужен API-ключ. Если
+`providers.<name>.api_key` не задан, OCR использует соответствующую переменную
+окружения. Провайдер `chatgpt` вместо этого использует учётные данные ChatGPT,
+созданные командой `ocr auth login`.
 
-Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP URL.
+Claude Code и Codex используют нативную аутентификацию CLI. API-ключ и HTTP URL в OCR им не нужны.
 
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
-| `claude-code` | claude-code-cli | — | — (native CLI authentication) |
-| `codex` | codex-cli | — | — (native CLI authentication) |
+| `claude-code` | claude-code-cli | — | — (нативная аутентификация CLI) |
+| `codex` | codex-cli | — | — (нативная аутентификация CLI) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | не применяется (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -109,6 +111,22 @@ Claude Code and Codex use native CLI authentication, not an OCR API key or HTTP 
 HTTP-провайдеры используют `extra_body` для параметров запроса конкретной модели.
 Поле верхнего уровня `effort` и флаг `--effort` по-прежнему задают раунды ревью OCR, а не рассуждение модели.
 
+### Предварительная версия входа через ChatGPT
+
+В предварительной версии добавлен встроенный провайдер `chatgpt` для публичного API Responses. Переменной окружения API-ключа нет. Условия входа, согласия и использования описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
+
+Настройте провайдер и необязательные поля запроса с помощью `ocr config set`. Выберите модель через `ocr llm models` или задайте ее идентификатор явно:
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+Явно заданная модель отправляется, даже если ее нет в списке аккаунта. `extra_body` принимает только `reasoning`, `text` и `prompt_cache_key`; переопределение URL, протокола и учетных данных отклоняется.
+
 ### Переопределение Base URL встроенного провайдера
 
 У каждого встроенного провайдера есть предустановленный Base URL
@@ -116,6 +134,8 @@ HTTP-провайдеры используют `extra_body` для параме�
 точку — например, на собственный шлюз LiteLLM, который редко находится по
 предустановленному адресу `http://localhost:4000/v1` — задайте
 `providers.<name>.url`:
+
+Предварительная версия `chatgpt` является исключением: публичный адрес фиксирован, переопределение URL отклоняется.
 
 ```bash
 ocr config set provider                   litellm
@@ -131,7 +151,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock
 
-`bedrock` использует тот же Messages API, что и `anthropic`, но запросы
+По умолчанию `bedrock` использует протокол `anthropic-bedrock` и тот же Messages API, что и `anthropic`, но запросы
 подписываются по SigV4 из стандартной цепочки учётных данных AWS вместо
 передачи API-ключа, а хост определяется регионом. Задавать `api_key` не нужно,
 и он не принимается как замена подписи:
@@ -142,6 +162,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+Если для подключения к OpenAI-совместимому шлюзу вы задаете `providers.bedrock.protocol` значение `openai`, укажите адрес шлюза в `providers.bedrock.url`, а его API-ключ — через `providers.bedrock.api_key` или `providers.bedrock.api_key_cmd`. При выборе другой модели в `ocr config provider` сохраненный API-ключ остается на месте.
 
 | Поле | Значение |
 |---|---|
@@ -160,8 +182,8 @@ ocr config set providers.bedrock.aws_profile example-profile
 `aws bedrock list-inference-profiles --region <region>`, чтобы увидеть, что
 доступно в аккаунте; суффикс версии вроде `-v1:0` недопустим для новых семейств.
 
-`ocr llm test` показывает регион и профиль вместо URL, потому что у bedrock нет
-настроенного URL — хост определяется регионом:
+При использовании протокола по умолчанию `anthropic-bedrock` команда `ocr llm test`
+показывает регион и профиль вместо URL. Хост определяется регионом:
 
 ```
 Source: provider:bedrock
@@ -177,6 +199,15 @@ Model:  claude-sonnet-5
 принимается и молча игнорируется.
 
 ### Пользовательские провайдеры
+
+Поддерживаются имена вида `mimo-v2.6-flash` и `foo.api_key`. Прежде чем
+задавать поля нового имени с точками, создайте и выберите его командой
+`ocr config set provider <name>`; она меняет активного провайдера.
+Существующие записи можно редактировать без выбора через
+`providers.<name>.<field>` или `custom_providers.<name>.<field>`.
+Имя не должно начинаться или заканчиваться точкой, содержать несколько
+точек подряд, пустые части или части только из пробелов. Имена без точек
+по-прежнему создаются неявно при настройке полей.
 
 Любое имя провайдера, которого нет в таблице выше, считается пользовательским.
 Параметр `protocol` поддерживает `anthropic`, `openai`, `openai-responses`,
