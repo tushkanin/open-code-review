@@ -109,7 +109,7 @@ unstaged + untracked 变更。
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
-| `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个子任务的 `REVIEW_FILTER_TASK` LLM 后处理调用。子任务评审单个文件或一组相关文件。 |
+| `--no-filter` | — | `false` | Bypass verification. Retain every candidate as skipped and uncertain, with a verification-disabled reason. |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
@@ -465,6 +465,16 @@ ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
 
+`ocr session export --json -o review.json` exports saved findings and the complete verification report.
+The report includes refuted and interrupted candidates.
+Review JSON adds `candidate_id` and `verification` beside original finding fields.
+Its separate `verification_report` retains every candidate.
+SARIF uses result properties for metadata and run properties for the report.
+Text and SARIF identify uncertainty and its reason.
+Full-context resume preserves valid decisions and rechecks incomplete candidates.
+Invalid group context, legacy data, and corrupt verification data require fresh group review.
+
+
 不指定会话 id 时，导出该仓库最新的会话。之所以这样默认，是因为
 `ocr review` 成功时并不会打印会话 id。不指定 `-o` 时，HTML 输出到标准输出。
 
@@ -558,9 +568,30 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status` 和 `logout` 默认使用 Sign in with ChatGPT。仍支持显式指定 `--provider chatgpt`。
+
+`chatgpt` provider 使用公开的 Sign in with ChatGPT 流程。请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` 支持 `--provider chatgpt` 和 `--account <client-id>`；`login` 还支持 `--no-browser`、`--new-account` 和 `--enable-plan`。ChatGPT 不支持 `--device`。`--enable-plan` 会针对已保存的注册请求同意，不能与 `--new-account` 同时使用。模型目录按账户显示；即使目录中没有，显式模型也会被接受。此 provider 的 `extra_body` 仅支持 `reasoning`、`text` 和 `prompt_cache_key`。账户管理、权限和限制请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)。
+
 ## `ocr llm`
 
-LLM 工具命令。两个子命令：
+LLM 工具命令。三个子命令：
 
 ```text
 ocr llm <sub-command>
@@ -568,6 +599,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

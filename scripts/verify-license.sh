@@ -40,6 +40,7 @@ FAILED=()
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
+  [ -f "$file" ] || continue
   is_ignored "$file" && continue
 
   ext="${file##*.}"

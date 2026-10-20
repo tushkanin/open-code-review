@@ -113,7 +113,7 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
-| `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
+| `--no-filter` | — | `false` | Bypass verification. Retain every candidate as skipped and uncertain, with a verification-disabled reason. |
 | `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
 | `--output <path>` | `-o` | stdout | 리뷰 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
@@ -483,6 +483,16 @@ ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
 
+`ocr session export --json -o review.json` exports saved findings and the complete verification report.
+The report includes refuted and interrupted candidates.
+Review JSON adds `candidate_id` and `verification` beside original finding fields.
+Its separate `verification_report` retains every candidate.
+SARIF uses result properties for metadata and run properties for the report.
+Text and SARIF identify uncertainty and its reason.
+Full-context resume preserves valid decisions and rechecks incomplete candidates.
+Invalid group context, legacy data, and corrupt verification data require fresh group review.
+
+
 세션 id를 주지 않으면 해당 저장소의 가장 최근 세션을 내보냅니다. 성공한
 `ocr review`는 세션 id를 출력하지 않기 때문에 이것이 기본값입니다. `-o`를 주지
 않으면 HTML은 표준 출력으로 나갑니다.
@@ -580,9 +590,30 @@ ocr config model                           Interactive model selection
 
 키 전체 목록과 스키마, 예시는 [설정](../configuration/)을 참고하세요.
 
+
+
+## `ocr auth` {#ocr-auth}
+
+`ocr auth login`, `status`, `logout`은 기본적으로 Sign in with ChatGPT를 사용합니다. 명시적인 `--provider chatgpt`도 계속 지원합니다.
+
+`chatgpt` provider는 공개 Sign in with ChatGPT 흐름을 사용합니다. [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth`는 `--provider chatgpt` 및 `--account <client-id>`를 받으며 `login`은 `--no-browser`, `--new-account`, `--enable-plan`도 받습니다. ChatGPT는 `--device`를 지원하지 않습니다. `--enable-plan`은 저장된 등록에 대한 동의를 요청하며 `--new-account`와 함께 사용할 수 없습니다. 모델 목록은 계정별로 다르며 목록에 없어도 명시적 모델을 사용할 수 있습니다. 이 provider의 `extra_body`는 `reasoning`, `text`, `prompt_cache_key`만 지원합니다. 계정 관리, 권한 및 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
 ## `ocr llm` {#ocr-llm}
 
-LLM 유틸리티 명령입니다. 하위 명령은 두 가지입니다:
+LLM 유틸리티 명령입니다. 하위 명령은 세 가지입니다:
 
 ```text
 ocr llm <sub-command>
@@ -590,6 +621,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test` {#ocr-llm-test}

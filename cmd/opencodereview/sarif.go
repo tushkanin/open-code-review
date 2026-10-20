@@ -14,6 +14,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/verification"
 )
 
 // --- SARIF v2.1.0 structure definitions (OASIS standard) ---
@@ -41,6 +42,7 @@ type sarifRun struct {
 	Tool        sarifTool         `json:"tool"`
 	Results     []sarifResult     `json:"results"`
 	Invocations []sarifInvocation `json:"invocations,omitempty"`
+	Properties  map[string]any    `json:"properties,omitempty"`
 }
 
 type sarifTool struct {
@@ -67,6 +69,7 @@ type sarifResult struct {
 	Locations           []sarifLocation   `json:"locations,omitempty"`
 	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
 	Fixes               []sarifFix        `json:"fixes,omitempty"`
+	Properties          map[string]any    `json:"properties,omitempty"`
 }
 
 type sarifLocation struct {
@@ -128,7 +131,7 @@ type sarifNotification struct {
 // warnings as tool execution notifications. When comments is empty or nil,
 // results is an empty array (not null), so the document remains structurally
 // valid for SARIF consumers.
-func outputSARIF(comments []model.LlmComment, version string, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer) error {
+func outputSARIF(comments []model.LlmComment, version string, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer, verified ...*verification.Result) error {
 	report := sarifReport{
 		Schema:  sarifSchema,
 		Version: sarifVersion,
@@ -144,6 +147,15 @@ func outputSARIF(comments []model.LlmComment, version string, warnings []agent.A
 			Results:     sarifResults(comments),
 			Invocations: []sarifInvocation{sarifInvocationFromRun(warnings, manifest, len(comments))},
 		}},
+	}
+	if len(verified) > 0 && verified[0] != nil {
+		report.Runs[0].Properties = map[string]any{"verification_report": verified[0].Report, "verification_completion": summarizeVerification(verified[0].Report)}
+		for i, finding := range projectFindings(comments, verified[0].Published) {
+			report.Runs[0].Results[i].Properties = map[string]any{"candidate_id": finding.CandidateID, "verification": finding.Verification}
+			if finding.Verification != nil && finding.Verification.Verdict == verification.Uncertain {
+				report.Runs[0].Results[i].Message.Text += "\nUncertain: " + finding.Verification.Reason.Explanation
+			}
+		}
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

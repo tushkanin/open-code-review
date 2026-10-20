@@ -32,12 +32,10 @@ const (
 	ExcludeTooLarge          = model.ExcludeTooLarge
 )
 
-// Preview loads diffs and applies the same selection the real run applies
-// before dispatch, returning structured preview data without dispatching any
-// LLM calls. Given the run's Args.Template, its will_review set is the set a
-// fresh, non-resumed, unbudgeted run registers as selected coverage; a zero
-// Template.MaxTokens leaves the per-file size ceiling disabled, exactly as it
-// is for a run configured that way.
+// Preview applies file selection without model requests or session persistence.
+// ManagedPreview selects the object policy of an OCR-managed review.
+// Other previews retain ordinary Git replacement behavior.
+// A zero Template.MaxTokens disables the per-file size ceiling.
 //
 // Its totals cover the tracked changeset. A workspace run also reviews
 // untracked files, but an untracked file under a provider directory (vendor/,
@@ -113,6 +111,9 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 // not retain potentially large unified diffs or file contents for them.
 func (a *Agent) loadPreviewDiffs(ctx context.Context) (diff.DiffSet, error) {
 	provider := a.newDiffProvider()
+	if !a.args.ManagedPreview {
+		provider.UseGitReplacements()
+	}
 	set, err := provider.GetDiffSet(ctx)
 	if err != nil {
 		return diff.DiffSet{}, err

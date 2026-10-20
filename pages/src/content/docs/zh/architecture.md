@@ -235,8 +235,7 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 2. **重新定位任务** *（可选回退）*——当行解析在较复杂的 diff 上失败时，OCR 运行
    `RE_LOCATION_TASK` prompt，请模型重新锚定片段。对改写过的 `existing_code`
    字符串有用。
-3. **评审过滤**——main 循环结束后（worker 池排空），`REVIEW_FILTER_TASK` LLM
-   调用对照 diff 检查收集到的评论，移除可证明为错的评论。此处错误被记录并忽略。
+3. **Verification** — each round drains its workers, persists candidates, and uses a fresh captured-evidence conversation. Errors retain incomplete uncertainty.
 4. **第二轮行解析**——`Agent.Run` 返回后，顶层命令对完整评论集重跑
    `diff.ResolveLineNumbers`（见 `cmd/opencodereview/review_cmd.go`），以捕获
    `existing_code` 跨多文件或被重新定位步骤更新的评论。
@@ -271,7 +270,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `PLAN_TASK` | plan 阶段——产出清单。 |
 | `MAIN_TASK` | main 评审循环——发出 `code_comment` 调用。 |
 | `MEMORY_COMPRESSION_TASK` | 摘要 compress 区。 |
-| `REVIEW_FILTER_TASK` | 循环后移除可证明为错评论的流程。 |
+| `VERIFICATION_TASK` | Independent captured-evidence investigation with structured candidate-local decisions. |
 | `RE_LOCATION_TASK` | 为 `existing_code` 无法匹配的评论重新锚定。 |
 
 每个 prompt 是一个 `{role, prompt_file}` 引用列表，指向模板目录中的 `.md` 文件
@@ -286,13 +285,11 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{diffs}}` | 当前组内所有文件的 diff，逐个包在 `<file>` 元素中，整体放在 `<review_files>` 里。 |
 | `{{file_list}}` | （仅 `GROUPING_TASK`）变更文件的元数据清单：路径、状态、`+`/`-` 行数。 |
 | `{{plan_guidance}}` | plan 阶段的输出，plan 被跳过时移除。 |
-| `{{confirmed_comments}}` | 前几轮已确认的发现；第 1 轮为空并被移除。 |
+| `{{prior_findings}}` | Earlier candidate claims with their actual verification dispositions; empty on round 1. |
 | `{{plan_tools}}` | plan 阶段工具定义的纯文本（由 `formatToolDefs` 渲染），用于 `PLAN_TASK` system prompt。 |
 | `{{requirement_background}}` | `--background` 或 `--background-file` 的有效内容（文件优先）。 |
 | `{{current_system_date_time}}` | 运行的本地时间戳，格式 `YYYY-MM-DD HH:MM`（无秒或时区）。 |
 | `{{context}}` | （仅压缩）要摘要的 XML 渲染消息。 |
-| `{{path}}` | 组的 key（组内文件路径，逗号分隔），用于 `REVIEW_FILTER_TASK`。 |
-| `{{comments}}` | 累积的评论（JSON），用于 `REVIEW_FILTER_TASK`。 |
 
 占位符替换位于
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)。

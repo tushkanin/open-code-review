@@ -105,6 +105,7 @@ func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
 
+	prepareVerificationFixture(t, a)
 	comments, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("dispatchSubtasks: %v", err)
@@ -199,6 +200,7 @@ func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
 
+	prepareVerificationFixture(t, a)
 	comments, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("dispatchSubtasks must not return an error for a controlled stop: %v", err)
@@ -264,6 +266,7 @@ func TestDispatchSubtasks_UnlimitedBudget(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
 
+	prepareVerificationFixture(t, a)
 	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
 		t.Fatalf("dispatchSubtasks: %v", err)
 	}
@@ -339,6 +342,7 @@ func TestDispatchSubtasks_TokenBudgetStopsInFlightGroup(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
 
+	prepareVerificationFixture(t, a)
 	comments, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("dispatchSubtasks must not return an error for a controlled stop: %v", err)
@@ -449,6 +453,7 @@ func TestDispatchSubtasks_TokenBudgetSkipsNextRoundAfterCompletedRound(t *testin
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
 
+	prepareVerificationFixture(t, a)
 	comments, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("dispatchSubtasks: %v", err)

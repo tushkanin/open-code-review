@@ -20,6 +20,8 @@ type CompareResult struct {
 	// NotReviewed holds before-findings whose file the after run never looked
 	// at. They are not resolved: nobody re-checked them.
 	NotReviewed []model.LlmComment `json:"not_reviewed"`
+	// MatchedBefore lets consumers retain occurrence identity across line drift and renames.
+	MatchedBefore []model.LlmComment `json:"-"`
 }
 
 // Compare buckets the findings of an earlier run (before) against a later one
@@ -51,6 +53,7 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 		k := findingKey(c, path)
 		if matches := pool[k]; len(matches) > 0 {
 			res.Persisting = append(res.Persisting, matches[0])
+			res.MatchedBefore = append(res.MatchedBefore, c)
 			pool[k] = matches[1:]
 			continue
 		}

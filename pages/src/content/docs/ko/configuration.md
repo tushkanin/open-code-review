@@ -36,12 +36,17 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 내장 프로바이더 {#built-in-providers}
 
-다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
+다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 대부분은 API 키가 필요하며, `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다. `chatgpt`는 대신 `ocr auth login`이 만든 ChatGPT 자격 증명을 사용합니다.
+
+Claude Code와 Codex는 네이티브 CLI 인증을 사용합니다. OCR API 키나 HTTP URL은 필요하지 않습니다.
 
 | 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `claude-code` | claude-code-cli | — | — (네이티브 CLI 인증) |
+| `codex` | codex-cli | — | — (네이티브 CLI 인증) |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 해당 없음 (Sign in with ChatGPT) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
@@ -98,9 +103,27 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 HTTP 프로바이더는 모델별 요청 옵션에 `extra_body`를 사용합니다.
 최상위 `effort`와 `--effort`는 모델 추론이 아니라 OCR 리뷰 라운드 수를 제어합니다.
 
+### ChatGPT 로그인 미리보기
+
+이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
+
+`ocr config set`으로 provider와 선택적 요청 필드를 설정합니다. `ocr llm models`에서 모델을 선택하거나 모델 slug를 직접 지정할 수 있습니다.
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+계정별 목록에 없는 모델도 명시하면 전송됩니다. `extra_body`는 `reasoning`, `text`, `prompt_cache_key`만 받으며 엔드포인트, 프로토콜, 자격 증명 재정의는 거부됩니다.
+
 ### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
 모든 내장 프로바이더에는 미리 설정된 Base URL이 있습니다(위 표 참고). 내장 프로바이더를 다른 엔드포인트로 보내려면 `providers.<name>.url`을 설정합니다(예: 자체 호스팅 LiteLLM 게이트웨이는 미리 설정된 기본값 `http://localhost:4000/v1`에 있는 경우가 드뭅니다):
+
+`chatgpt` 미리보기는 예외입니다. 공개 엔드포인트는 고정되어 있으며 URL 재정의를 거부합니다.
 
 ```bash
 ocr config set provider                   litellm
@@ -113,7 +136,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ### AWS Bedrock {#aws-bedrock}
 
-`bedrock`은 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
+`bedrock`은 기본 `anthropic-bedrock` 프로토콜에서 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
 
 ```bash
 ocr config set provider                      bedrock
@@ -121,6 +144,8 @@ ocr config set model                         us.anthropic.claude-sonnet-4-6
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
+
+OpenAI 호환 게이트웨이에 연결하려고 `providers.bedrock.protocol`을 `openai`로 설정했다면, `providers.bedrock.url`에 게이트웨이 URL을 설정하고 `providers.bedrock.api_key` 또는 `providers.bedrock.api_key_cmd`로 게이트웨이의 API 키를 제공하세요. `ocr config provider`에서 모델을 변경해도 저장된 API 키는 유지됩니다.
 
 | 필드 | 의미 |
 |---|---|
@@ -131,7 +156,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 
 모델 식별자는 계정 **과** 리전 단위로 정해지므로 OCR이 제공하는 목록은 닫힌 집합이 아니라 출발점입니다. 목록에 없더라도 계정에서 유효한 추론 프로필 ID나 애플리케이션 추론 프로필 ARN이면 그대로 받습니다. 계정에서 무엇을 쓸 수 있는지는 `aws bedrock list-inference-profiles --region <region>`으로 확인하세요. 최신 계열에서는 `-v1:0` 같은 버전 접미사가 유효하지 않습니다.
 
-bedrock에는 설정된 URL이 없고 호스트를 리전이 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
+기본 `anthropic-bedrock` 프로토콜에서는 리전이 호스트를 결정하므로, `ocr llm test`는 URL 대신 리전과 프로필을 표시합니다:
 
 ```
 Source: provider:bedrock
@@ -145,7 +170,16 @@ Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습�
 
 ### 커스텀 프로바이더 {#custom-providers}
 
-위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
+`mimo-v2.6-flash`, `foo.api_key`처럼 점이 포함된 이름을 사용할 수 있습니다. 새로운 이름에 점이 있다면 필드를 설정하기 전에 `ocr config set provider <name>`으로 생성하고 선택하세요. 이 명령은 현재 프로바이더를 변경합니다. 기존 항목은 선택하지 않고도 `providers.<name>.<field>` 또는 `custom_providers.<name>.<field>`로 수정할 수 있습니다. 이름의 처음이나 끝에 점이 있거나, 점이 연속되거나, 구분된 부분이 비어 있거나 공백으로만 구성된 이름은 허용되지 않습니다. 점이 없는 이름은 필드 설정 시 계속 자동으로 생성됩니다.
+
+위 표에 없는 프로바이더 이름은 커스텀으로 취급합니다.
+`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock`,
+`claude-code-cli`, `codex-cli`를 지원합니다.
+`anthropic`, `openai`, `openai-responses` 프로토콜에는 `url`이 필요합니다.
+네이티브 `claude-code-cli`와 `codex-cli` 항목에는 모델이 필요합니다.
+이 항목은 네이티브 CLI 인증을 사용하며 OCR의 `url`, `api_key`, `api_key_cmd`는 필요하지 않습니다.
+
+다음 예시는 HTTP 프로바이더를 사용합니다:
 
 ```bash
 ocr config set provider                             my-gateway

@@ -19,8 +19,8 @@ Current time in the real world: {{current_system_date_time}}
 ### Review Plan
 {{plan_guidance}}
 
-### Previously Confirmed Findings
-{{confirmed_comments}}
+### Prior Findings
+{{prior_findings}}
 
 Now please review the code changes in <review_files> above.
 </user_task>

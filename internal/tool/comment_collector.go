@@ -12,8 +12,9 @@ import (
 // CommentCollector is a thread-safe, per-Agent comment store.
 // Each Agent instance owns its own collector so reviews across different repos do not interfere.
 type CommentCollector struct {
-	mu       sync.Mutex
-	comments []model.LlmComment
+	mu        sync.Mutex
+	comments  []model.LlmComment
+	producers map[string][]model.LlmComment
 }
 
 // NewCommentCollector creates an empty collector.
@@ -26,6 +27,23 @@ func (c *CommentCollector) Add(cm model.LlmComment) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.comments = append(c.comments, cm)
+}
+
+// AddForProducer retains ownership even when source resolution changes the finding path.
+func (c *CommentCollector) AddForProducer(producer string, cm model.LlmComment) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.comments = append(c.comments, cm)
+	if c.producers == nil {
+		c.producers = make(map[string][]model.LlmComment)
+	}
+	c.producers[producer] = append(c.producers[producer], cm)
+}
+
+func (c *CommentCollector) ProducerComments(producer string, start int) []model.LlmComment {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]model.LlmComment(nil), c.producers[producer][start:]...)
 }
 
 // Comments returns all collected comments.

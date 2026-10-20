@@ -114,7 +114,7 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | Целевая ссылка, на которой заканчивается diff (например, `feature-branch`). Если задана, OCR вычисляет `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Один коммит для ревью (сравнивается с родительским). |
 | `--preview` | `-p` | `false` | Запускает конвейер фильтрации, но пропускает LLM. Выводит список файлов и причины исключения. Учитывает `--format json`; `--format sarif` не поддерживается (в предпросмотре нет завершённых находок для вывода). |
-| `--no-filter` | — | `false` | Сохраняет все комментарии ревью и пропускает вызов LLM постобработки `REVIEW_FILTER_TASK` для каждой подзадачи. Подзадача проверяет один файл или набор связанных файлов. |
+| `--no-filter` | — | `false` | Bypass verification. Retain every candidate as skipped and uncertain, with a verification-disabled reason. |
 | `--resume <session-id>` | — | — | Возобновляет предыдущую совместимую сессию ревью диапазона или коммита. |
 | `--format <fmt>` | `-f` | `text` | `text` (для чтения человеком), `json` (машиночитаемый массив комментариев) или `sarif` (отчёт SARIF 2.1.0 для GitHub Code Scanning). |
 | `--output <path>` | `-o` | stdout | Запись результатов ревью в файл UTF-8 (`-` означает stdout). Файл создаётся лениво при первой записи, поэтому неудачные запуски не затрагивают существующие файлы. В текстовом формате цветовые коды ANSI удаляются автоматически. |
@@ -482,6 +482,16 @@ ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
 
+`ocr session export --json -o review.json` exports saved findings and the complete verification report.
+The report includes refuted and interrupted candidates.
+Review JSON adds `candidate_id` and `verification` beside original finding fields.
+Its separate `verification_report` retains every candidate.
+SARIF uses result properties for metadata and run properties for the report.
+Text and SARIF identify uncertainty and its reason.
+Full-context resume preserves valid decisions and rechecks incomplete candidates.
+Invalid group context, legacy data, and corrupt verification data require fresh group review.
+
+
 Без id сессии экспортируется самая свежая сессия репозитория. Такое
 поведение выбрано по умолчанию, потому что успешный `ocr review` не печатает
 id сессии. Без `-o` HTML выводится в stdout.
@@ -587,9 +597,30 @@ ocr config model                           Interactive model selection
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
 
+
+
+## `ocr auth`
+
+`ocr auth login`, `status` и `logout` по умолчанию используют Sign in with ChatGPT. Явный параметр `--provider chatgpt` также поддерживается.
+
+Провайдер `chatgpt` использует документированный процесс Sign in with ChatGPT. См. [руководство по предварительной версии ChatGPT](../chatgpt-preview/).
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` принимает `--provider chatgpt` и `--account <client-id>`, а `login` также принимает `--no-browser`, `--new-account` и `--enable-plan`. Для ChatGPT параметр `--device` не поддерживается. `--enable-plan` запрашивает согласие для сохраненной регистрации и несовместим с `--new-account`. Список моделей зависит от аккаунта; явно заданная модель допустима, даже если ее нет в списке. Этот провайдер принимает в `extra_body` только `reasoning`, `text` и `prompt_cache_key`. Управление аккаунтами, права и ограничения описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
+
 ## `ocr llm`
 
-Служебные команды LLM. Доступны две подкоманды:
+Служебные команды LLM. Доступны три подкоманды:
 
 ```text
 ocr llm <sub-command>
@@ -597,6 +628,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

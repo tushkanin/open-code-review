@@ -992,6 +992,15 @@ func (m providerTUIModel) apiKeyCmdForStep() string {
 	return ""
 }
 
+func (m providerTUIModel) officialProviderUsesExternalCredentials() bool {
+	p := m.currentProvider()
+	var entry ProviderEntry
+	if m.existingCfg != nil {
+		entry = m.existingCfg.Providers[p.Name]
+	}
+	return providerUsesExternalCredentials(p, entry)
+}
+
 func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	if m.apiKeyOriginal != "" {
 		return true, ""
@@ -1007,9 +1016,9 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	}
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
-		if p.AmbientAuth {
+		if m.officialProviderUsesExternalCredentials() {
 			// Reachable when an existing config is edited: an empty key is the
-			// correct state for a provider that signs from the AWS chain.
+			// correct state when credentials are supplied outside the config.
 			return true, ""
 		}
 		if officialProviderEnvKeySet(p) {
@@ -1246,6 +1255,11 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 	r := m.result()
 	if r.provider == "" {
 		m.formError = "Provider name is required"
+		m.cpStep = cpStepName
+		return m, m.cpNameInput.Focus()
+	}
+	if err := validateProviderName(r.provider); err != nil {
+		m.formError = err.Error()
 		m.cpStep = cpStepName
 		return m, m.cpNameInput.Focus()
 	}
@@ -1873,11 +1887,17 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		ambientAuth := m.activeTab == tabOfficial && m.currentProvider().AmbientAuth
+		externalCredentials := m.activeTab == tabOfficial && m.officialProviderUsesExternalCredentials()
 		if cp, ok := m.selectedCustomProvider(); ok {
-			ambientAuth = llm.UsesAmbientAuth(llm.NormalizeProtocol(cp.entry.Protocol))
+			externalCredentials = llm.UsesAmbientAuth(llm.NormalizeProtocol(cp.entry.Protocol))
 		}
-		if ambientAuth {
+		if externalCredentials {
+			if m.activeTab == tabOfficial && m.currentProvider().ExternalAuth {
+				// The protected token store rejects credentials from the OCR config.
+				m.apiKeyOriginal = ""
+				m.apiKeyMasked = false
+				m.apiKeyInput.SetValue("")
+			}
 			m.formError = ""
 			m.confirmed = true
 			return m, tea.Quit

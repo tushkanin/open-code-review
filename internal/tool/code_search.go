@@ -48,6 +48,31 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	if strings.TrimSpace(searchText) == "" {
 		return "Error: search_text is blank", nil
 	}
+	if p.FileReader.Evidence != nil {
+		result, err := p.FileReader.Evidence.Search(ctx, searchText, caseSensitive, usePerlRegexp, patterns, gitGrepMaxCount)
+		if err != nil {
+			return "", err
+		}
+		var sb strings.Builder
+		if result.Truncated {
+			sb.WriteString("Note: Search results reach the match or byte limit. Coverage is limited; narrow file_patterns.\n")
+		}
+		if len(result.Unavailable) > 0 {
+			sb.WriteString("Warning: Evidence is unavailable for some paths. Search coverage is incomplete.\n")
+		}
+		last := ""
+		for _, m := range result.Matches {
+			if m.Path != last {
+				fmt.Fprintf(&sb, "File: %s\n", m.Path)
+				last = m.Path
+			}
+			fmt.Fprintf(&sb, "%d|%s\n", m.Line, m.Content)
+		}
+		if sb.Len() == 0 {
+			return "No matches found", nil
+		}
+		return sb.String(), nil
+	}
 
 	result, err := p.gitGrep(ctx, searchText, caseSensitive, usePerlRegexp, patterns)
 	if err != nil {

@@ -138,6 +138,7 @@ func (dc *delegateContext) mergeBase(ctx context.Context) string {
 		return ""
 	}
 	provider := diff.NewProvider(dc.cc.RepoDir, dc.opts.from, dc.opts.to, dc.cc.GitRunner)
+	provider.UseGitReplacements()
 	return provider.MergeBase(ctx)
 }
 

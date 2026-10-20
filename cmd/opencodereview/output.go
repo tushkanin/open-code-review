@@ -21,7 +21,14 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
+	"github.com/alibaba/open-code-review/internal/verification"
 )
+
+type findingOutput struct {
+	model.LlmComment
+	CandidateID  string                `json:"candidate_id,omitempty"`
+	Verification *verification.Summary `json:"verification,omitempty"`
+}
 
 func outputText(comments []model.LlmComment) {
 	if len(comments) == 0 {
@@ -67,6 +74,21 @@ func isSubtaskErrorType(warningType string) bool {
 	return warningType == "subtask_error" || warningType == "scan_subtask_error"
 }
 
+// hasReviewLimitWarning reports whether a declared review limit — the
+// tool-request round budget or the aggregate token budget — was reached.
+// llmloop records the warning regardless of how the grace round ended, and an
+// item completed there is still a completed, reusable result, so this must not
+// affect status or coverage. It only keeps a zero-finding result from reading
+// as a clean review when a limit truncated it.
+func hasReviewLimitWarning(warnings []agent.AgentWarning) bool {
+	for _, w := range warnings {
+		if w.Type == llmloop.WarningReviewLimitReached {
+			return true
+		}
+	}
+	return false
+}
+
 func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer) {
 	if manifest != nil {
 		fmt.Fprintln(out, manifestMessage(manifest, len(comments)))
@@ -74,9 +96,12 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			renderComment(c, out)
 		}
 	} else if len(comments) == 0 {
-		if hasSubtaskErrors(warnings) {
+		switch {
+		case hasSubtaskErrors(warnings):
 			fmt.Fprintln(out, "Some files could not be reviewed due to errors (see warnings below).")
-		} else {
+		case hasReviewLimitWarning(warnings):
+			fmt.Fprintln(out, "A review limit was reached before finishing; some findings may be missing (see warnings below).")
+		default:
 			fmt.Fprintln(out, "No comments generated. Looks good to me.")
 		}
 	} else {
@@ -334,7 +359,10 @@ type jsonOutput struct {
 	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
 	// them here, and sits last with omitempty so a first-try-success run emits
 	// byte-identical JSON to before #368.
-	RetryReport *llm.RetryReport `json:"retry_report,omitempty"`
+	RetryReport            *llm.RetryReport        `json:"retry_report,omitempty"`
+	Verification           *verification.Report    `json:"verification_report,omitempty"`
+	VerificationCompletion *verificationCompletion `json:"verification_completion,omitempty"`
+	findings               []findingOutput
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -356,7 +384,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, verified ...*verification.Result) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -381,14 +409,23 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Manifest:       manifest,
 		RetryReport:    retryReport,
 	}
+	if len(verified) > 0 && verified[0] != nil {
+		payload.findings = projectFindings(comments, verified[0].Published)
+		payload.Verification = &verified[0].Report
+		completion := summarizeVerification(verified[0].Report)
+		payload.VerificationCompletion = &completion
+	}
 	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
 	if manifest != nil {
 		payload.Status = string(manifest.TerminalState)
 		payload.Message = manifestMessage(manifest, len(comments))
 	} else if len(comments) == 0 {
-		if hasSubtaskErrors(warnings) {
+		switch {
+		case hasSubtaskErrors(warnings):
 			payload.Message = "Some files could not be reviewed due to errors."
-		} else {
+		case hasReviewLimitWarning(warnings):
+			payload.Message = "A review limit was reached before finishing; some findings may be missing."
+		default:
 			payload.Message = "No comments generated. Looks good to me."
 		}
 	}
@@ -424,6 +461,7 @@ var retryStages = []struct {
 	{session.MemoryCompressionTask, "Context compaction"},
 	{session.ReLocationTask, "Comment re-location"},
 	{session.ReviewFilterTask, "Comment filtering"},
+	{session.VerificationTask, "Finding verification"},
 	{session.GroupingTask, "File grouping"},
 }
 

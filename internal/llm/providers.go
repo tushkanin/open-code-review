@@ -29,11 +29,14 @@ type Provider struct {
 	BaseURL     string
 	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
 	EnvVar      string // environment variable name for API key fallback
-	Models      []string
 
 	// AmbientAuth identifies presets that use AWS or native CLI authentication.
 	// The effective protocol decides whether an entry needs OCR credentials.
-	AmbientAuth bool
+	AmbientAuth           bool
+	ExternalAuth          bool
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	Models                []string
 }
 
 // After modifying the built-in provider registry, run `go generate ./internal/llm`
@@ -96,6 +99,16 @@ var registry = []Provider{
 			"global.anthropic.claude-sonnet-5",
 			"global.anthropic.claude-opus-4-8",
 		},
+	},
+	{
+		Name:                  "chatgpt",
+		DisplayName:           "ChatGPT plan (Sign in with ChatGPT preview)",
+		Protocol:              ProtocolOpenAIResponses,
+		BaseURL:               "https://api.openai.com/v1",
+		ExternalAuth:          true,
+		RequiresStreaming:     true,
+		RejectsSamplingParams: true,
+		Models:                []string{},
 	},
 	{
 		Name:        "openai",

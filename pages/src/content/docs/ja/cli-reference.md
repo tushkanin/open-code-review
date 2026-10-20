@@ -108,7 +108,7 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
-| `--no-filter` | — | `false` | すべてのレビューコメントを保持し、サブタスクごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。サブタスクは単一ファイル、または関連ファイルのまとまりをレビューします。 |
+| `--no-filter` | — | `false` | Bypass verification. Retain every candidate as skipped and uncertain, with a verification-disabled reason. |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
@@ -469,6 +469,16 @@ ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
 
+`ocr session export --json -o review.json` exports saved findings and the complete verification report.
+The report includes refuted and interrupted candidates.
+Review JSON adds `candidate_id` and `verification` beside original finding fields.
+Its separate `verification_report` retains every candidate.
+SARIF uses result properties for metadata and run properties for the report.
+Text and SARIF identify uncertainty and its reason.
+Full-context resume preserves valid decisions and rechecks incomplete candidates.
+Invalid group context, legacy data, and corrupt verification data require fresh group review.
+
+
 セッション id を指定しない場合は、そのリポジトリの最新セッションをエクスポートします。
 成功した `ocr review` はセッション id を出力しないため、これが既定の動作です。
 `-o` を指定しない場合、HTML は標準出力に書き出されます。
@@ -558,9 +568,30 @@ ocr config model                           Interactive model selection
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
 
+
+
+## `ocr auth`
+
+`ocr auth login`、`status`、`logout` は既定で Sign in with ChatGPT を使用します。明示的な `--provider chatgpt` も引き続き使用できます。
+
+`chatgpt` provider では公開された Sign in with ChatGPT フローを使用します。[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
+```bash
+ocr auth login --provider chatgpt
+ocr auth login --provider chatgpt --no-browser
+ocr auth login --provider chatgpt --enable-plan
+ocr auth login --provider chatgpt --new-account
+ocr auth status --provider chatgpt
+ocr auth select <saved-client-id> --provider chatgpt
+ocr auth logout --provider chatgpt --account <saved-client-id>
+ocr llm models
+```
+
+`ocr auth` は `--provider chatgpt` と `--account <client-id>` を受け付けます。`login` はさらに `--no-browser`、`--new-account`、`--enable-plan` を受け付けます。ChatGPT では `--device` をサポートしません。`--enable-plan` は保存済み登録の同意を要求し、`--new-account` とは併用できません。モデル一覧はアカウントごとに異なります。一覧にないモデルも明示すれば使用できます。この provider の `extra_body` は `reasoning`、`text`、`prompt_cache_key` のみ対応します。アカウント管理、権限、制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
+
 ## `ocr llm`
 
-LLM ユーティリティコマンドです。2 つのサブコマンドがあります:
+LLM ユーティリティコマンドです。3 つのサブコマンドがあります:
 
 ```text
 ocr llm <sub-command>
@@ -568,6 +599,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List current account-specific ChatGPT models
 ```
 
 ### `ocr llm test`

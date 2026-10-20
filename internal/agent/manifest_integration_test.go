@@ -109,6 +109,7 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 	})
 	a.diffs = diffs
 	a.currentDate = "2026-07-26 12:00"
+	prepareVerificationFixture(t, a)
 	return a
 }
 
@@ -573,6 +574,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	})
 	a.diffs = diffs
 	a.currentDate = "2026-07-26 12:00"
+	prepareVerificationFixture(t, a)
 
 	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
 		t.Fatalf("a stuck group with partial output must not be a dispatch error: %v", err)
@@ -595,7 +597,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	}
 }
 
-func TestManifestFlowResumeRecordsParentAndReusedItem(t *testing.T) {
+func TestManifestFlowLegacyResumeRetainsParentAndReviewsEveryFile(t *testing.T) {
 	diffs := []model.Diff{
 		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
 		{OldPath: "fresh.go", NewPath: "fresh.go", Diff: "+fresh", Insertions: 1},
@@ -621,7 +623,7 @@ func TestManifestFlowResumeRecordsParentAndReusedItem(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 	manifest := finishManifestFlow(t, a)
-	if manifest.ParentRunID != "parent-run" || len(manifest.Coverage.Reused) != 1 || len(manifest.Coverage.Completed) != 1 {
+	if manifest.ParentRunID != "parent-run" || len(manifest.Coverage.Reused) != 0 || len(manifest.Coverage.Completed) != 2 {
 		t.Fatalf("manifest = %+v", manifest)
 	}
 	if manifest.Input.RequestedFrom != "main" || manifest.Input.RequestedHead != "feature" || manifest.Input.SourceArtifactSHA256 == "" {
@@ -649,11 +651,7 @@ func (p *promptSpy) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (
 	return agentTaskDoneResponse(), nil
 }
 
-// TestManifestFlowReusedCommentsStayOutOfPrompts pins the isolation half of
-// reuse: a reused finding is merged into the output and nothing else. Feeding it
-// back into a prompt would let the parent's conclusions steer the child's review
-// of a different file, and the finding would also be paid for twice.
-func TestManifestFlowReusedCommentsStayOutOfPrompts(t *testing.T) {
+func TestManifestFlowLegacyClaimsDoNotEnterFreshDiscovery(t *testing.T) {
 	diffs := []model.Diff{
 		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
 		{OldPath: "fresh.go", NewPath: "fresh.go", Diff: "+fresh", Insertions: 1},
@@ -690,22 +688,17 @@ func TestManifestFlowReusedCommentsStayOutOfPrompts(t *testing.T) {
 			merged = true
 		}
 	}
-	if !merged {
-		t.Fatalf("reused finding must be merged into the output, got %+v", comments)
+	if merged {
+		t.Fatalf("a legacy claim must not enter fresh review results: %+v", comments)
 	}
-	// One dispatch, for fresh.go only — cached.go was reused, so it is neither
-	// re-reviewed nor mentioned to the model.
 	spy.mu.Lock()
 	defer spy.mu.Unlock()
-	if len(spy.prompts) != 1 {
-		t.Fatalf("prompts = %d, want 1 (fresh.go only)", len(spy.prompts))
+	if len(spy.prompts) != 2 {
+		t.Fatalf("prompts = %d, want both files", len(spy.prompts))
 	}
 	for _, prompt := range spy.prompts {
 		if strings.Contains(prompt, reusedFinding) {
 			t.Error("a reused finding must not enter a new LLM context")
-		}
-		if strings.Contains(prompt, "cached.go") {
-			t.Error("a reused file must not be sent to the model again")
 		}
 	}
 }
@@ -780,7 +773,7 @@ func TestManifestFlowResumeOfFullyFailedParentRedispatchesEverything(t *testing.
 	}
 }
 
-func TestManifestFlowResumeWithReusedAndAllRerunsFailedIsPartial(t *testing.T) {
+func TestManifestFlowLegacyResumeWithOneFailureIsPartial(t *testing.T) {
 	diffs := []model.Diff{
 		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
 		{OldPath: "bad.go", NewPath: "bad.go", Diff: "+bad", Insertions: 1},
@@ -807,7 +800,7 @@ func TestManifestFlowResumeWithReusedAndAllRerunsFailedIsPartial(t *testing.T) {
 		t.Fatalf("partial resumed dispatch must not return an error: %v", err)
 	}
 	manifest := finishManifestFlow(t, a)
-	if manifest.TerminalState != session.StatePartial || len(manifest.Coverage.Reused) != 1 || len(manifest.Coverage.Failed) != 1 {
+	if manifest.TerminalState != session.StatePartial || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Reused) != 0 || len(manifest.Coverage.Failed) != 1 {
 		t.Fatalf("manifest = %+v", manifest)
 	}
 }
@@ -861,10 +854,8 @@ func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
 	if manifest.ParentRunID != "parent-run" {
 		t.Fatalf("parent_run_id = %q, want parent-run", manifest.ParentRunID)
 	}
-	// The fingerprint hit is recorded as reused; the child recomputes its
-	// own input identity (source_artifact_sha256).
-	if len(manifest.Coverage.Reused) != 1 || len(manifest.Coverage.Completed) != 0 {
-		t.Fatalf("coverage reused=%d completed=%d, want 1/0",
+	if len(manifest.Coverage.Reused) != 0 || len(manifest.Coverage.Completed) != 1 {
+		t.Fatalf("coverage reused=%d completed=%d, want 0/1",
 			len(manifest.Coverage.Reused), len(manifest.Coverage.Completed))
 	}
 	if manifest.Input.SourceArtifactSHA256 == "" {

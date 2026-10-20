@@ -1314,6 +1314,30 @@ p {
     word-break: break-word;
 }
 
+.verification-status {
+    padding: 0.65rem;
+    border-left: 3px solid var(--border-subtle);
+    background: var(--surface-inset);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.verification-record {
+    margin: 0.75rem 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+    overflow-wrap: anywhere;
+}
+.verification-record summary {
+    cursor: pointer;
+}
+.verification-record pre {
+    padding: 0.75rem;
+    background: var(--surface-inset);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .comment-code-diff {
     display: grid;
     grid-template-columns: 1fr;

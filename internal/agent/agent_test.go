@@ -17,6 +17,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -90,238 +91,6 @@ func codeCommentResponse(path string) *llm.ChatResponse {
 		}},
 		Model: "fake",
 		Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 20},
-	}
-}
-
-// TestBuildGroupFilterCommentsJSON covers the group-level serialization: the
-// filter sees one flat, globally indexed list spanning every file in the group,
-// so each entry must carry its own path — that is what lets the model tell which
-// diff a candidate comment belongs to, and what parseFilterToolCalls' c-N indices
-// are resolved against.
-func TestBuildGroupFilterCommentsJSON(t *testing.T) {
-	tests := []struct {
-		name     string
-		comments []model.LlmComment
-		wantIDs  []string
-	}{
-		{
-			name:     "empty slice",
-			comments: nil,
-			wantIDs:  nil,
-		},
-		{
-			name: "single comment",
-			comments: []model.LlmComment{
-				{Path: "a.go", Content: "fix this", ExistingCode: "old code"},
-			},
-			wantIDs: []string{"c-0"},
-		},
-		{
-			name: "ids stay sequential across files",
-			comments: []model.LlmComment{
-				{Path: "a.go", Content: "issue A"},
-				{Path: "b.xml", Content: "issue B", ExistingCode: "existing"},
-				{Path: "a.go", Content: "issue C"},
-			},
-			wantIDs: []string{"c-0", "c-1", "c-2"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := buildGroupFilterCommentsJSON(tt.comments)
-
-			var items []struct {
-				ID           string `json:"id"`
-				Path         string `json:"path"`
-				Content      string `json:"content"`
-				ExistingCode string `json:"existing_code,omitempty"`
-			}
-			if err := json.Unmarshal([]byte(got), &items); err != nil {
-				t.Fatalf("invalid JSON: %v\nraw: %s", err, got)
-			}
-
-			if len(items) != len(tt.comments) {
-				t.Fatalf("len = %d, want %d", len(items), len(tt.comments))
-			}
-
-			for i, item := range items {
-				if tt.wantIDs != nil && item.ID != tt.wantIDs[i] {
-					t.Errorf("items[%d].ID = %q, want %q", i, item.ID, tt.wantIDs[i])
-				}
-				if item.Path != tt.comments[i].Path {
-					t.Errorf("items[%d].Path = %q, want %q", i, item.Path, tt.comments[i].Path)
-				}
-				if item.Content != tt.comments[i].Content {
-					t.Errorf("items[%d].Content = %q, want %q", i, item.Content, tt.comments[i].Content)
-				}
-				if item.ExistingCode != tt.comments[i].ExistingCode {
-					t.Errorf("items[%d].ExistingCode = %q, want %q", i, item.ExistingCode, tt.comments[i].ExistingCode)
-				}
-			}
-		})
-	}
-}
-
-func TestParseFilterResponse(t *testing.T) {
-	tests := []struct {
-		name    string
-		raw     string
-		total   int
-		wantSet map[int]struct{}
-	}{
-		{
-			name:    "valid JSON array",
-			raw:     `["c-0","c-2","c-4"]`,
-			total:   5,
-			wantSet: map[int]struct{}{0: {}, 2: {}, 4: {}},
-		},
-		{
-			name:    "markdown fenced JSON",
-			raw:     "```json\n[\"c-1\"]\n```",
-			total:   3,
-			wantSet: map[int]struct{}{1: {}},
-		},
-		{
-			name:    "out-of-range indices ignored",
-			raw:     `["c-0","c-10","c-99"]`,
-			total:   5,
-			wantSet: map[int]struct{}{0: {}},
-		},
-		{
-			name:    "negative index ignored",
-			raw:     `["c--1","c-0"]`,
-			total:   2,
-			wantSet: map[int]struct{}{0: {}},
-		},
-		{
-			name:    "invalid ID format ignored",
-			raw:     `["x-0","c-abc","c-1"]`,
-			total:   3,
-			wantSet: map[int]struct{}{1: {}},
-		},
-		{
-			name:    "invalid JSON returns nil",
-			raw:     `not json`,
-			total:   5,
-			wantSet: nil,
-		},
-		{
-			name:    "empty array",
-			raw:     `[]`,
-			total:   5,
-			wantSet: map[int]struct{}{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseFilterResponse(tt.raw, tt.total)
-			if tt.wantSet == nil {
-				if got != nil {
-					t.Errorf("expected nil, got %v", got)
-				}
-				return
-			}
-			if len(got) != len(tt.wantSet) {
-				t.Fatalf("len = %d, want %d; got %v", len(got), len(tt.wantSet), got)
-			}
-			for idx := range tt.wantSet {
-				if _, ok := got[idx]; !ok {
-					t.Errorf("missing index %d in result", idx)
-				}
-			}
-		})
-	}
-}
-
-func TestParseFilterToolCalls(t *testing.T) {
-	tests := []struct {
-		name    string
-		calls   []llm.ToolCall
-		total   int
-		wantSet map[int]struct{}
-	}{
-		{
-			name:    "no tool calls",
-			calls:   nil,
-			total:   5,
-			wantSet: nil,
-		},
-		{
-			name: "report_incorrect_comments with IDs",
-			calls: []llm.ToolCall{{
-				Function: llm.FunctionCall{
-					Name:      "report_incorrect_comments",
-					Arguments: `{"comment_ids": ["c-0", "c-2"]}`,
-				},
-			}},
-			total:   5,
-			wantSet: map[int]struct{}{0: {}, 2: {}},
-		},
-		{
-			name: "approve_all_comments returns empty map",
-			calls: []llm.ToolCall{{
-				Function: llm.FunctionCall{
-					Name:      "approve_all_comments",
-					Arguments: `{}`,
-				},
-			}},
-			total:   5,
-			wantSet: map[int]struct{}{},
-		},
-		{
-			name: "ignores non-matching tool names",
-			calls: []llm.ToolCall{{
-				Function: llm.FunctionCall{
-					Name:      "other_tool",
-					Arguments: `{"comment_ids": ["c-0"]}`,
-				},
-			}},
-			total:   5,
-			wantSet: nil,
-		},
-		{
-			name: "out-of-range indices ignored",
-			calls: []llm.ToolCall{{
-				Function: llm.FunctionCall{
-					Name:      "report_incorrect_comments",
-					Arguments: `{"comment_ids": ["c-0", "c-10"]}`,
-				},
-			}},
-			total:   5,
-			wantSet: map[int]struct{}{0: {}},
-		},
-		{
-			name: "invalid JSON arguments falls through",
-			calls: []llm.ToolCall{{
-				Function: llm.FunctionCall{
-					Name:      "report_incorrect_comments",
-					Arguments: `not json`,
-				},
-			}},
-			total:   5,
-			wantSet: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := parseFilterToolCalls(tt.calls, tt.total)
-			if tt.wantSet == nil {
-				if got != nil {
-					t.Errorf("expected nil, got %v", got)
-				}
-				return
-			}
-			if len(got) != len(tt.wantSet) {
-				t.Fatalf("len = %d, want %d; got %v", len(got), len(tt.wantSet), got)
-			}
-			for idx := range tt.wantSet {
-				if _, ok := got[idx]; !ok {
-					t.Errorf("missing index %d in result", idx)
-				}
-			}
-		})
 	}
 }
 
@@ -782,68 +551,6 @@ func TestReviewItemFingerprintStableAcrossPatchPosition(t *testing.T) {
 	}
 }
 
-func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
-	diffs := []model.Diff{
-		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
-		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
-	}
-	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
-	resume := &session.ResumeState{
-		SessionID:  "old-session",
-		Model:      "anthropic-model",
-		ReviewMode: session.ReviewModeRange,
-		DiffFrom:   "main",
-		DiffTo:     "feature",
-		Items: map[string]session.ResumeItem{
-			fp: {
-				FilePath:    "a.go",
-				OldPath:     "a.go",
-				NewPath:     "a.go",
-				Fingerprint: fp,
-				Comments: []model.LlmComment{{
-					Path:    "a.go",
-					Content: "cached comment",
-				}},
-			},
-		},
-		// The checkpoint line alone earns no reuse: coverage is the parent
-		// manifest's to state, so a.go is only eligible because the parent settled
-		// it as completed.
-		Manifest: &session.RunManifest{
-			Coverage: session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}},
-		},
-	}
-	collector := tool.NewCommentCollector()
-	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
-		ReviewMode:  session.ReviewModeRange,
-		DiffFrom:    "main",
-		DiffTo:      "feature",
-		ResumedFrom: "old-session",
-	})
-	defer sess.Finalize()
-	a := New(Args{
-		From:             "main",
-		To:               "feature",
-		Model:            "openai-model",
-		CommentCollector: collector,
-		Resume:           resume,
-		Session:          sess,
-	})
-
-	toDispatch := a.applyResume(diffs)
-	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
-		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
-	}
-	comments := collector.Comments()
-	if len(comments) != 1 || comments[0].Content != "cached comment" {
-		t.Fatalf("comments = %+v", comments)
-	}
-	info := a.ResumeInfo()
-	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 1 || info.PreviousModel != "anthropic-model" || info.CurrentModel != "openai-model" {
-		t.Fatalf("ResumeInfo = %+v", info)
-	}
-}
-
 // TestAgentGettersNil covers the defensive early returns in the accessor
 // methods when the agent (or its session) was never fully constructed, so
 // callers never advertise a resume target that does not exist.
@@ -1038,6 +745,7 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	}
 	a.currentDate = "2025-06-26 10:00"
 
+	prepareVerificationFixture(t, a)
 	comments, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("dispatchSubtasks: %v", err)
@@ -1086,6 +794,7 @@ func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T
 	a.diffs = []model.Diff{diff}
 	a.currentDate = "2025-06-26 10:00"
 
+	prepareVerificationFixture(t, a)
 	comments, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("dispatchSubtasks: %v", err)
@@ -1155,6 +864,7 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	a.diffs = []model.Diff{diff}
 	a.currentDate = "2025-06-26 10:00"
 
+	prepareVerificationFixture(t, a)
 	_, err := a.dispatchSubtasks(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "all 1 file review(s) failed") {
 		t.Fatalf("expected all-failed error, got %v", err)
@@ -1162,9 +872,22 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	if client.calls != 1 {
 		t.Fatalf("LLM calls = %d, want 1", client.calls)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != diff.NewPath {
-		t.Fatalf("warnings = %+v, want one subtask_error for %s", warnings, diff.NewPath)
+	// The runner also records the spent round budget, with its incomplete
+	// verdict; the subtask_error is the failure diagnostic this test is about.
+	var limitWarnings, subtaskErrors []AgentWarning
+	for _, w := range a.Warnings() {
+		switch w.Type {
+		case llmloop.WarningReviewLimitReached:
+			limitWarnings = append(limitWarnings, w)
+		case "subtask_error":
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(limitWarnings) != 1 || !strings.Contains(limitWarnings[0].Message, "did not complete the task") {
+		t.Fatalf("limit warnings = %+v, want one incomplete verdict", limitWarnings)
+	}
+	if len(subtaskErrors) != 1 || subtaskErrors[0].File != diff.NewPath {
+		t.Fatalf("subtask errors = %+v, want one for %s", subtaskErrors, diff.NewPath)
 	}
 	sess.Finalize()
 
@@ -1221,13 +944,19 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 	}
 	a.currentDate = "2025-06-26 10:00"
 
+	prepareVerificationFixture(t, a)
 	_, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatalf("one completed file should keep the review partial, got %v", err)
 	}
-	warnings := a.Warnings()
-	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != "incomplete.go" {
-		t.Fatalf("warnings = %+v, want one subtask_error for incomplete.go", warnings)
+	var subtaskErrors []AgentWarning
+	for _, w := range a.Warnings() {
+		if w.Type == "subtask_error" {
+			subtaskErrors = append(subtaskErrors, w)
+		}
+	}
+	if len(subtaskErrors) != 1 || subtaskErrors[0].File != "incomplete.go" {
+		t.Fatalf("subtask errors = %+v, want one for incomplete.go", subtaskErrors)
 	}
 }
 
@@ -1287,6 +1016,7 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 	}
 	a.currentDate = "2025-06-26 10:00"
 
+	prepareVerificationFixture(t, a)
 	_, err := a.dispatchSubtasks(context.Background())
 	if err != nil {
 		t.Fatal(err)

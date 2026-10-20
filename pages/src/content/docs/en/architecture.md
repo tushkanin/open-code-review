@@ -188,7 +188,7 @@ The loop has five exit conditions:
 5. `addNextMessage` returned false — compression couldn't bring the
    message buffer back under the warning threshold.
 
-In all cases collected `code_comment` calls become review comments.
+In all cases, collected `code_comment` calls become durable verification candidates.
 
 ### Review rounds
 
@@ -202,12 +202,9 @@ group, to improve recall on large groups. The round count is set by the
 | `medium` (default) | 2 |
 | `high` | 3 |
 
-Each round after the first re-runs `MAIN_TASK` with the findings already
-confirmed by earlier rounds injected as `{{confirmed_comments}}`, and
-**without** the plan — a plan tends to act as a coverage ceiling once the
-obvious issues are found. Rounds stop early when a round adds no new
-findings, when the confirmed-comment cap is reached, or when the
-aggregate token budget (`--max-tokens-budget`) is exhausted.
+Each later round receives earlier claims and their actual dispositions through `{{prior_findings}}`.
+Later rounds omit the plan to avoid a discovery coverage limit.
+Rounds stop when no new candidate appears, the candidate cap is reached, or the aggregate token budget is exhausted.
 
 ## Memory compression
 
@@ -294,10 +291,10 @@ main tool-use loop never blocks on post-processing:
    fails on a non-trivial diff, OCR runs the `RE_LOCATION_TASK` prompt
    asking the model to re-anchor the snippet. Useful for paraphrased
    `existing_code` strings.
-3. **Review filter** — after the main loop finishes (and the worker pool
-   drains), the `REVIEW_FILTER_TASK` LLM call inspects the collected
-   comments against the diff and removes ones that are provably
-   incorrect. Errors here are logged and ignored.
+3. **Verification** — each round drains its producer group's workers and persists new candidates before a fresh verifier conversation.
+   The verifier reads captured repository evidence and submits candidate-local decisions.
+   OCR publishes confirmed and uncertain candidates and retains every candidate in the complete report.
+   Error and cancellation exits retain claims without further verifier requests.
 4. **Second line-resolution pass** — once `Agent.Run` returns, the
    top-level command re-runs `diff.ResolveLineNumbers` over the full
    comment set (see `cmd/opencodereview/review_cmd.go`) to catch
@@ -337,7 +334,7 @@ grouping — see `enforceGroupTokenBudget` above.
 | `PLAN_TASK` | Planning phase — produces a checklist. |
 | `MAIN_TASK` | Main review loop — emits `code_comment` calls. |
 | `MEMORY_COMPRESSION_TASK` | Summarises the compress zone. |
-| `REVIEW_FILTER_TASK` | Post-loop pass that removes provably-incorrect comments. |
+| `VERIFICATION_TASK` | Independent captured-evidence investigation with structured candidate-local decisions. |
 | `RE_LOCATION_TASK` | Re-anchors a comment whose `existing_code` couldn't be matched. |
 
 Each prompt is a list of `{role, prompt_file}` references that point to
@@ -353,14 +350,12 @@ per-group:
 | `{{change_files}}` | Status + path of every changed file in the PR *outside* this group. |
 | `{{diffs}}` | The group's diffs, one XML element per file. |
 | `{{plan_guidance}}` | Output of the plan phase, or removed when plan is skipped or on rounds 2+. |
-| `{{confirmed_comments}}` | Findings confirmed by earlier review rounds (empty on round 1). |
+| `{{prior_findings}}` | Earlier candidate claims with their actual verification dispositions; empty on round 1. |
 | `{{plan_tools}}` | Plan-phase tool definitions as plain text (rendered by `formatToolDefs`), used in the `PLAN_TASK` system prompt. |
 | `{{requirement_background}}` | The effective background from `--background` or `--background-file` (file takes precedence). |
 | `{{current_system_date_time}}` | Local timestamp for the run, formatted `YYYY-MM-DD HH:MM` (no seconds or timezone). |
 | `{{file_list}}` | (grouping only) file metadata — path, status, `+/-` counts. |
 | `{{context}}` | (compression only) the XML-rendered messages to summarise. |
-| `{{path}}` | Group key (comma-joined sorted paths), used in `REVIEW_FILTER_TASK`. |
-| `{{comments}}` | Accumulated comments (JSON), used in `REVIEW_FILTER_TASK`. |
 
 The placeholder substitution lives in
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).

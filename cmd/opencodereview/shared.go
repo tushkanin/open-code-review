@@ -29,7 +29,12 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/verification"
 )
+
+type verificationResultProvider interface {
+	VerificationResult() verification.Result
+}
 
 // commonContext bundles the state that both `ocr review` and `ocr scan`
 // need to load *before* deciding whether to dispatch a preview or a real
@@ -834,6 +839,11 @@ func emitRunResult(
 ) error {
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
+	var verified *verification.Result
+	if provider, ok := ag.(verificationResultProvider); ok {
+		result := provider.VerificationResult()
+		verified = &result
+	}
 
 	duration := time.Since(startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
@@ -887,12 +897,23 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, verified)
 	}
 	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out, verified)
 	}
-	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	if verified == nil {
+		outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	} else {
+		if manifest != nil {
+			fmt.Fprintln(out, manifestMessage(manifest, len(comments)))
+		}
+		for _, finding := range projectFindings(comments, verified.Published) {
+			renderFinding(finding, out)
+		}
+		outputVerificationCompletion(out, verified.Report)
+		outputTextWithWarnings(nil, ag.Warnings(), nil, io.Discard)
+	}
 	// Between the comments/warnings block and the project summary: the report is
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.

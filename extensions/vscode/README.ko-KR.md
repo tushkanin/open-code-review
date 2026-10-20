@@ -19,6 +19,16 @@
 - **설정 관리**: LLM 프로바이더 설정을 확장 안에서 보고 편집할 수 있습니다(저장은 `ocr config set`).
 - **모델 전환 / 연결 테스트**: 상태 표시줄에서 모델을 전환하고 LLM 연결을 테스트합니다.
 
+### Verification results
+
+Sidebar cards and native comments show verification status and the supplied reason separately.
+Complete uncertainty, incomplete verification, and explicit bypass remain distinct.
+Legacy findings and unsupported metadata remain unverified.
+Verification counts remain separate from file coverage and published-finding counts.
+Verification does not change content, suggestions, or user action status.
+See [verification results and focused checks](README.md#verification-results) for the full contract.
+
+
 ---
 
 ## 사전 요구 사항

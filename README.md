@@ -100,6 +100,13 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 - **Scenario-tuned prompts** — Prompt templates deeply optimized for code review, improving effectiveness while reducing token consumption.
 - **Scenario-tuned toolset** — Distilled from deep analysis of tool-call traces in large-scale production data — including call frequency distributions, per-tool repetition rates, and the impact of new tools on the overall call chain — resulting in a purpose-built toolset that is more stable and predictable for code review than a generic agent toolkit.
 
+Diff reviews verify each candidate against captured repository evidence.
+OCR publishes confirmed and uncertain findings, with explicit uncertainty reasons.
+It retains refuted findings in the complete session report.
+`--no-filter` bypasses verification and labels every finding as unverified.
+JSON and SARIF expose the complete report separately from published findings.
+Use `ocr session export --json -o review.json` to export saved findings and their complete report.
+
 ## How to Use
 
 ### Prerequisites
@@ -136,6 +143,20 @@ The interactive UI guides you through provider selection, API key entry, and mod
 For CLI setup, environment variables, custom providers, and other advanced configuration, see [Configuration](https://open-codereview.ai/docs/configuration).
 
 **2. Review**
+
+OCR-managed diff reviews use fixed repository evidence for each run.
+Range and commit reviews use resolved commits.
+OCR-managed diff reviews ignore Git replacement refs during capture and later evidence access.
+Workspace reviews capture local changes, including context outside the selected files.
+Later file edits or branch changes do not change built-in file reads, searches, file lookup, or captured diff reads.
+Search uses captured Git attributes and diff driver settings to classify text and binary content.
+Search also preserves Git's `diff.<driver>.binary=auto` setting.
+Attribute pathspecs use the captured attribute states, including values and exclusions.
+Search commands share the existing Git process limit.
+
+The staged fallback uses index content when it supplies the reviewed diff.
+Unavailable or inconsistent content remains unavailable instead of using an older version.
+Full-file scans and host-managed delegation keep their current behavior.
 
 ```bash
 cd your-project
