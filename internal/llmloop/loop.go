@@ -728,7 +728,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 					}
 				}
 				if d != nil {
-					if !located && r.deps.Template.ReLocationTask != nil {
+					if !located && rctx.Err() == nil && ctx.Err() == nil && r.deps.Template.ReLocationTask != nil {
 						// rlStart stays ahead of prompt construction, which is
 						// where it sat when ReLocateComment built the messages
 						// itself — moving it would silently change what
@@ -763,7 +763,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 						}
 					}
 				}
-				r.deps.CommentCollector.Add(*cm)
+				r.deps.CommentCollector.AddForProducer(taskKey, *cm)
 			}
 		}
 

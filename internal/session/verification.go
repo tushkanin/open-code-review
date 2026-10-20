@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sort"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	v "github.com/alibaba/open-code-review/internal/verification"
@@ -353,8 +354,12 @@ func (s *ResumeState) VerificationContext(contextID string) (v.Context, bool) {
 
 func verificationComments(result v.Result, filePath string) []model.LlmComment {
 	comments := []model.LlmComment{}
+	checkpoints := make(map[string]string, len(result.Report.Records))
+	for _, record := range result.Report.Records {
+		checkpoints[record.Candidate.ID] = record.Candidate.Origin.Checkpoint
+	}
 	for _, finding := range result.Published {
-		if finding.Finding.Path == filePath {
+		if finding.Finding.Path == filePath || (finding.Finding.Path == "" && checkpoints[finding.CandidateID] == filePath) {
 			comments = append(comments, finding.Finding)
 		}
 	}
@@ -395,4 +400,119 @@ func LoadVerificationResult(repoDir, sessionID string) (v.Result, error) {
 		return v.Result{}, err
 	}
 	return state.VerificationResult()
+}
+
+// savedCheckpoints keeps display order separate from fingerprint-based reuse admission.
+func (s *ResumeState) savedCheckpoints() []ResumeItem {
+	items := make([]ResumeItem, 0, len(s.Items)+len(s.legacyItems))
+	if s.displayOrder != nil {
+		legacy := 0
+		for _, fingerprint := range s.displayOrder {
+			if fingerprint == "" {
+				items = append(items, s.legacyItems[legacy])
+				legacy++
+				continue
+			}
+			if item, ok := s.Items[fingerprint]; ok {
+				items = append(items, item)
+			}
+		}
+		return items
+	}
+	keys := make([]string, 0, len(s.Items))
+	for key := range s.Items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		items = append(items, s.Items[key])
+	}
+	return items
+}
+
+// SavedFindings preserves candidate identity and includes claims without a final checkpoint.
+func (s *ResumeState) SavedFindings() ([]v.PublishedFinding, v.Report, error) {
+	result, auditErr := s.VerificationResult()
+	if s == nil {
+		return nil, result.Report, auditErr
+	}
+	items := s.savedCheckpoints()
+	trusted := make(map[string]bool)
+	bound := make(map[string]bool)
+	invalid := make(map[string]bool)
+	legacyPaths := make(map[string]bool)
+	for _, item := range items {
+		if item.Verification == nil {
+			legacyPaths[item.FilePath] = true
+			continue
+		}
+		bound[item.Verification.ContextID] = true
+		if s.verification.bindingValid(item.Verification) {
+			trusted[item.Verification.ContextID] = true
+		} else {
+			for _, ref := range item.Verification.Revisions {
+				invalid[ref.CandidateID] = true
+			}
+		}
+	}
+	unverified := v.Summary{Verdict: v.Uncertain, State: v.Incomplete, Reason: v.Reason{Code: "unverified_session", Explanation: "The saved finding has no valid verification checkpoint."}}
+	pathOf := func(candidate *v.Candidate) string {
+		if candidate.Finding.Path != "" {
+			return candidate.Finding.Path
+		}
+		return candidate.Origin.Checkpoint
+	}
+	isTrusted := func(record *v.Record) bool {
+		return auditErr == nil && !invalid[record.Candidate.ID] && (trusted[record.Candidate.ContextID] || (!bound[record.Candidate.ContextID] && !legacyPaths[pathOf(&record.Candidate)] && s.verification.records[record.Candidate.ID].terminal))
+	}
+	records := result.Report.Records
+	used := make([]bool, len(records))
+	out := []v.PublishedFinding{}
+	appendCandidate := func(index int) {
+		record := &records[index]
+		finding := v.PublishedFinding{CandidateID: record.Candidate.ID, Finding: record.Candidate.Finding, Verification: unverified}
+		if isTrusted(record) {
+			finding.Verification = v.Summary{Verdict: record.Verdict, State: record.State, Reason: record.Reason}
+		}
+		finding.Finding.Path = pathOf(&record.Candidate)
+		out = append(out, finding)
+		used[index] = true
+	}
+	for i := range records {
+		if isTrusted(&records[i]) && records[i].Verdict == v.Refuted {
+			used[i] = true
+		}
+	}
+	for _, item := range items {
+		if auditErr == nil && s.verification.bindingValid(item.Verification) {
+			for i := range records {
+				if !used[i] && records[i].Candidate.ContextID == item.Verification.ContextID && pathOf(&records[i].Candidate) == item.FilePath {
+					appendCandidate(i)
+				}
+			}
+			continue
+		}
+		for _, claim := range item.Comments {
+			matched := false
+			for i := range records {
+				if !used[i] && !isTrusted(&records[i]) && records[i].Candidate.Finding == claim && pathOf(&records[i].Candidate) == item.FilePath {
+					appendCandidate(i)
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				if claim.Path == "" {
+					claim.Path = item.FilePath
+				}
+				out = append(out, v.PublishedFinding{Finding: claim, Verification: unverified})
+			}
+		}
+	}
+	for i := range records {
+		if !used[i] {
+			appendCandidate(i)
+		}
+	}
+	return out, result.Report, auditErr
 }

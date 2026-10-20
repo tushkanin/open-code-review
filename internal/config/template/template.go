@@ -26,7 +26,6 @@ type Template struct {
 	GroupingBundleLineThreshold int              `json:"GROUPING_BUNDLE_LINE_THRESHOLD"`
 	MaxReviewRounds             int              `json:"MAX_REVIEW_ROUNDS"`
 	ReLocationTask              *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask            *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	VerificationTask            *LlmConversation `json:"VERIFICATION_TASK,omitempty"`
 	GroupingTask                *LlmConversation `json:"GROUPING_TASK,omitempty"`
 }
@@ -180,7 +179,6 @@ type templateManifest struct {
 	GroupingBundleLineThreshold int                   `json:"GROUPING_BUNDLE_LINE_THRESHOLD"`
 	MaxReviewRounds             int                   `json:"MAX_REVIEW_ROUNDS"`
 	ReLocationTask              *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask            *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	VerificationTask            *manifestConversation `json:"VERIFICATION_TASK,omitempty"`
 	GroupingTask                *manifestConversation `json:"GROUPING_TASK,omitempty"`
 }
@@ -243,9 +241,6 @@ func LoadDefault() (*Template, error) {
 		return nil, fmt.Errorf("MEMORY_COMPRESSION_TASK: %w", err)
 	}
 	if tpl.ReLocationTask, err = resolveOptionalConversation(m.ReLocationTask, "RE_LOCATION_TASK"); err != nil {
-		return nil, err
-	}
-	if tpl.ReviewFilterTask, err = resolveOptionalConversation(m.ReviewFilterTask, "REVIEW_FILTER_TASK"); err != nil {
 		return nil, err
 	}
 	if tpl.VerificationTask, err = resolveOptionalConversation(m.VerificationTask, "VERIFICATION_TASK"); err != nil {

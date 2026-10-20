@@ -145,7 +145,7 @@ make build
 └── bin/                  # NPM wrapper
 ```
 
-`internal/verification` contains the decision core. It does not run model requests or change the active review filter.
+`internal/verification` contains the decision core. The review agent uses it after each discovery round.
 The caller supplies one captured `diff.EvidenceView`, a verification-context identity, and verifier provenance to `New`.
 The context identity covers verifier inputs. It is separate from the captured code-state identity in each citation.
 
@@ -173,7 +173,7 @@ It does not write sessions, admit resumed work, or connect to output surfaces.
 Run its isolated Git fixtures with `make test PACKAGES=./internal/verification`.
 
 `llmloop.Runner.RunVerification` provides an independent, bounded conversation for a supplied group and discovery round.
-It does not replace the active review filter.
+The review agent calls it after durable candidate capture and before publication.
 The caller supplies captured candidates, their core and shared mutex, the captured evidence view, group diffs, scope, rules, and background.
 The caller retains its group concurrency slot and deadline.
 The runner checks candidate identity and the core's evidence binding before it sends a request.
@@ -200,8 +200,8 @@ The fingerprint excludes conversation and candidate identifiers.
 
 Verifier request transcripts use `session.VerificationTask`.
 Ordinary transcripts do not replace structured verification events, checkpoints, replay, or resume admission.
-The session storage APIs below provide those records without active review integration.
-Active filter replacement, bypass integration, CLI output, other presentation surfaces, scans, and delegation remain unchanged.
+The review agent connects these APIs to structured session records and CLI output.
+Scans, delegation, and other presentation surfaces retain their separate behavior.
 Run the runner fixtures with `make test PACKAGES=./internal/llmloop`.
 
 ### Durable verification sessions
@@ -256,7 +256,16 @@ Verification writes and bound checkpoints return marshal, write, newline, and fl
 The session retains a persistence failure and returns it again from later checkpoints and finalization.
 A final record also marks the failure when its writer remains available.
 Affected checkpoints cannot claim verification reuse.
-These APIs do not replace the active filter, orchestrate reviews, add CLI output, or change scans and delegation.
+The review agent drains each producer group's workers before capture, including error and cancellation exits.
+It retains producer ownership when source resolution moves a claim to another file.
+Later discovery rounds receive original claims with their actual verification dispositions.
+Group reuse validates every member against current full context before it restores one shared inventory.
+Concurrent group workers share one immutable reuse index through synchronized initialization.
+Incomplete candidates receive recheck under their saved group and round.
+CLI projections retain candidate identity separately from original finding fields.
+Saved publication uses candidate identity, not claim text, to select trusted findings.
+Historical display retains fingerprint-less checkpoints without adding them to the reuse index.
+Scans, delegation, and workspace resume boundaries remain unchanged.
 Run their fixtures with `make test PACKAGES='./internal/verification ./internal/session'`.
 
 

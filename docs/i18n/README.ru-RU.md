@@ -100,6 +100,13 @@ Open Code Review — это CLI-инструмент для код-ревью н
 - **Промпты, заточенные под сценарий** — шаблоны промптов, глубоко оптимизированные под код-ревью: выше качество при меньшем расходе токенов.
 - **Специализированный набор инструментов** — создан на основе анализа вызовов инструментов в реальных проектах: частоты вызовов, доли повторных обращений к каждому инструменту и влияния новых инструментов на всю цепочку. Такой набор работает при код-ревью стабильнее и предсказуемее, чем универсальные инструменты агента.
 
+Diff reviews verify each candidate against captured repository evidence.
+OCR publishes confirmed and uncertain findings, with explicit uncertainty reasons.
+It retains refuted findings in the complete session report.
+`--no-filter` bypasses verification and labels every finding as unverified.
+JSON and SARIF expose the complete report separately from published findings.
+Use `ocr session export --json -o review.json` to export saved findings and their complete report.
+
 ## Как использовать
 
 ### Предварительные требования

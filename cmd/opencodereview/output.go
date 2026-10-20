@@ -21,7 +21,14 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
+	"github.com/alibaba/open-code-review/internal/verification"
 )
+
+type findingOutput struct {
+	model.LlmComment
+	CandidateID  string                `json:"candidate_id,omitempty"`
+	Verification *verification.Summary `json:"verification,omitempty"`
+}
 
 func outputText(comments []model.LlmComment) {
 	if len(comments) == 0 {
@@ -334,7 +341,10 @@ type jsonOutput struct {
 	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
 	// them here, and sits last with omitempty so a first-try-success run emits
 	// byte-identical JSON to before #368.
-	RetryReport *llm.RetryReport `json:"retry_report,omitempty"`
+	RetryReport            *llm.RetryReport        `json:"retry_report,omitempty"`
+	Verification           *verification.Report    `json:"verification_report,omitempty"`
+	VerificationCompletion *verificationCompletion `json:"verification_completion,omitempty"`
+	findings               []findingOutput
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -356,7 +366,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, verified ...*verification.Result) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -380,6 +390,12 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		SessionID:      sessionID,
 		Manifest:       manifest,
 		RetryReport:    retryReport,
+	}
+	if len(verified) > 0 && verified[0] != nil {
+		payload.findings = projectFindings(comments, verified[0].Published)
+		payload.Verification = &verified[0].Report
+		completion := summarizeVerification(verified[0].Report)
+		payload.VerificationCompletion = &completion
 	}
 	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
 	if manifest != nil {
@@ -424,6 +440,7 @@ var retryStages = []struct {
 	{session.MemoryCompressionTask, "Context compaction"},
 	{session.ReLocationTask, "Comment re-location"},
 	{session.ReviewFilterTask, "Comment filtering"},
+	{session.VerificationTask, "Finding verification"},
 	{session.GroupingTask, "File grouping"},
 }
 

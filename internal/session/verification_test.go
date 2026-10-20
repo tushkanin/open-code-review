@@ -138,7 +138,7 @@ func (f *verificationFixture) close(t *testing.T, history *SessionHistory) {
 func (f *verificationFixture) request() VerificationReuseRequest {
 	admission := request(nil)
 	admission.Identity.Mode = InputModeCommit
-	return VerificationReuseRequest{Options: SessionOptions{ReviewMode: ReviewModeCommit}, Admission: admission, Fingerprint: f.item().Fingerprint, Context: f.context, View: f.view, Provenance: v.Provenance{Provider: "next", Model: "next", ContractVersion: "fixture-contract"}}
+	return VerificationReuseRequest{Options: SessionOptions{ReviewMode: ReviewModeCommit}, Admission: admission, Fingerprints: []string{f.item().Fingerprint}, Context: f.context, View: f.view, Provenance: v.Provenance{Provider: "next", Model: "next", ContractVersion: "fixture-contract"}}
 }
 
 func (f *verificationFixture) load(t *testing.T) *ResumeState {
@@ -553,5 +553,51 @@ func TestVerificationMarshalFailureInvalidatesEarlierBinding(t *testing.T) {
 	requireDurable(t, err)
 	if got.Disposition != VerificationFresh {
 		t.Fatal("earlier binding conceals failed persistence")
+	}
+}
+
+func TestVerificationConcurrentReuseRetainsAdmissionAndCandidateIdentities(t *testing.T) {
+	f := durableFixture(t)
+	candidates := f.capture(t, "confirmed", "refuted", "interrupted")
+	citation := f.citation(t)
+	f.core.Submit([]v.Decision{durableDecision(candidates[0].ID, v.Confirmed, citation), durableDecision(candidates[1].ID, v.Refuted, citation)})
+	f.core.Fail("The provider disconnects.", candidates[2].ID)
+	requireDurable(t, f.history.RecordVerificationSnapshot(f.core.Result()))
+	requireDurable(t, f.history.RecordVerificationTerminal(f.id))
+	requireDurable(t, f.history.RecordVerificationCheckpoint(f.item(), f.id, ""))
+	f.close(t, f.history)
+	state := f.load(t)
+	req := f.request()
+	type outcome struct {
+		valid      VerificationReuse
+		invalid    VerificationReuse
+		validErr   error
+		invalidErr error
+	}
+	const workers = 16
+	start := make(chan struct{})
+	results := make(chan outcome, workers)
+	for range workers {
+		go func() {
+			<-start
+			valid, validErr := state.ReuseVerification(context.Background(), req)
+			invalidReq := req
+			invalidReq.Fingerprints = []string{f.item().Fingerprint, "unsettled-group-member"}
+			invalid, invalidErr := state.ReuseVerification(context.Background(), invalidReq)
+			results <- outcome{valid, invalid, validErr, invalidErr}
+		}()
+	}
+	close(start)
+	want := f.core.Result()
+	for range workers {
+		result := <-results
+		requireDurable(t, result.validErr)
+		requireDurable(t, result.invalidErr)
+		if result.valid.Disposition != VerificationRecheck || !reflect.DeepEqual(result.valid.Result, want) || !reflect.DeepEqual(result.valid.Recheck, []v.Candidate{candidates[2]}) {
+			t.Fatalf("concurrent reuse changes candidates, decisions, or recheck admission: %+v", result.valid)
+		}
+		if result.invalid.Disposition != VerificationFresh || result.invalid.Core != nil {
+			t.Fatalf("concurrent reuse admits an unsettled group member: %+v", result.invalid)
+		}
 	}
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/verification"
 	"github.com/alibaba/open-code-review/internal/viewer"
 	"github.com/spf13/cobra"
 )
@@ -98,18 +99,18 @@ var sessionCompareCmd = &cobra.Command{
 
 var sessionExportRepoDir string
 var sessionExportOutput string
+var sessionExportJSON bool
 
 var sessionExportCmd = &cobra.Command{
 	Use:   "export [flags] [session-id]",
-	Short: "Export one session as a self-contained HTML file",
-	Long: "Render a persisted review session as a single HTML file that opens offline:\n" +
-		"the viewer's stylesheet and script are inlined, so the artifact needs no network\n" +
-		"access and can be archived by CI. With no session id the newest session for the\n" +
-		"repo is exported.\n\n" +
-		"The artifact embeds the reviewed source excerpts the session recorded; treat it\n" +
-		"with the same care as the repository itself.",
+	Short: "Export a session as HTML or a complete JSON report",
+	Long: "Export a saved session as a self-contained HTML file by default.\n" +
+		"Use --json for saved findings and the complete verification report.\n" +
+		"With no session id, export the newest session for the repository.\n" +
+		"The artifact can contain source excerpts. Protect it like repository source.",
 	Example: "  ocr session export -o review.html\n" +
-		"  ocr session export 20250601-100000-abc123 -o review.html",
+		"  ocr session export 20250601-100000-abc123 -o review.html\n" +
+		"  ocr session export --json -o review.json",
 	Args:              maximumArgs(1),
 	ValidArgsFunction: completeSessionIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -214,6 +215,7 @@ func init() {
 	sessionCompareCmd.Flags().BoolVar(&sessionCompareJSON, "json", false, "emit the comparison as JSON")
 
 	sessionExportCmd.Flags().StringVar(&sessionExportRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionExportCmd.Flags().BoolVar(&sessionExportJSON, "json", false, "emit saved findings and the complete verification report")
 	addOutputPathFlag(sessionExportCmd, &sessionExportOutput)
 
 	sessionRmCmd.Flags().StringVar(&sessionRmRepoDir, "repo", "", "only look for the session under this repository (default: every repository)")
@@ -254,7 +256,11 @@ func runSessionExport(sessionID string) (retErr error) {
 	}
 	root, encodedRepo := filepath.Split(dir)
 
-	out, closeOut, err := resolveOutputWriter(sessionExportOutput, "html")
+	format := "html"
+	if sessionExportJSON {
+		format = "json"
+	}
+	out, closeOut, err := resolveOutputWriter(sessionExportOutput, format)
 	if err != nil {
 		return err
 	}
@@ -263,6 +269,18 @@ func runSessionExport(sessionID string) (retErr error) {
 			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
 		}
 	}()
+	if sessionExportJSON {
+		findings, report, err := loadSessionFindings(resolvedRepo, sessionID)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(struct {
+			Comments     []findingOutput     `json:"comments"`
+			Verification verification.Report `json:"verification_report"`
+		}{findings, report})
+	}
 
 	return viewer.ExportSession(out, filepath.Clean(root), encodedRepo, sessionID)
 }
@@ -303,18 +321,25 @@ func runSessionShow(sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", sessionID, err)
 	}
+	_, report, auditErr := loadSessionFindings(resolvedRepo, sessionID)
+	if auditErr != nil {
+		return auditErr
+	}
 
 	if sessionShowJSON {
 		payload := struct {
-			Summary *session.Summary     `json:"summary"`
-			Items   []session.ItemDetail `json:"items"`
-		}{Summary: summary, Items: items}
+			Summary      *session.Summary     `json:"summary"`
+			Items        []session.ItemDetail `json:"items"`
+			Verification verification.Report  `json:"verification_report"`
+		}{Summary: summary, Items: items, Verification: report}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
 	}
 
 	printSessionDetail(os.Stdout, summary, items)
+	data, _ := json.MarshalIndent(report, "", "  ")
+	fmt.Fprintf(os.Stdout, "\nVerification report:\n%s\n", data)
 	return nil
 }
 
@@ -323,19 +348,24 @@ func runSessionComments(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	comments, err := session.LoadComments(resolvedRepo, sessionID)
+	findings, _, err := loadSessionFindings(resolvedRepo, sessionID)
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", sessionID, err)
 	}
+	comments := make([]model.LlmComment, len(findings))
+	for i, finding := range findings {
+		comments[i] = finding.LlmComment
+	}
 	filtered := filterComments(comments, sessionCommentsSeverity, sessionCommentsCategory)
+	selected := selectFindingMetadata(filtered, findings)
 
 	if sessionCommentsJSON {
-		if filtered == nil {
-			filtered = []model.LlmComment{}
+		if selected == nil {
+			selected = []findingOutput{}
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(filtered)
+		return enc.Encode(selected)
 	}
 
 	if len(filtered) == 0 {
@@ -346,8 +376,8 @@ func runSessionComments(sessionID string) error {
 		}
 		return nil
 	}
-	for _, c := range filtered {
-		renderComment(c, os.Stdout)
+	for _, finding := range selected {
+		renderFinding(finding, os.Stdout)
 	}
 	return nil
 }
@@ -374,32 +404,33 @@ func runSessionCompare(beforeID, afterID string) error {
 			displayMode(beforeSummary.ReviewMode), displayMode(afterSummary.ReviewMode))
 	}
 
-	beforeComments, err := session.LoadComments(resolvedRepo, beforeID)
+	beforeFindings, _, err := loadSessionFindings(resolvedRepo, beforeID)
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", beforeID, err)
 	}
-	afterComments, err := session.LoadComments(resolvedRepo, afterID)
+	afterFindings, _, err := loadSessionFindings(resolvedRepo, afterID)
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
-	result := session.Compare(beforeComments, afterComments, afterSummary.RunManifest)
+	result := session.Compare(findingClaims(beforeFindings), findingClaims(afterFindings), afterSummary.RunManifest)
+	projected := projectComparison(result, beforeFindings, afterFindings)
 
 	if sessionCompareJSON {
 		payload := struct {
 			Before sessionCompareSide `json:"before"`
 			After  sessionCompareSide `json:"after"`
-			session.CompareResult
+			comparisonOutput
 		}{
-			Before:        describeCompareSide(beforeID, beforeSummary),
-			After:         describeCompareSide(afterID, afterSummary),
-			CompareResult: result,
+			Before:           describeCompareSide(beforeID, beforeSummary),
+			After:            describeCompareSide(afterID, afterSummary),
+			comparisonOutput: projected,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
 	}
 
-	printSessionCompare(beforeID, afterID, beforeSummary, afterSummary, result)
+	printSessionCompare(beforeID, afterID, beforeSummary, afterSummary, result, projected)
 	return nil
 }
 
@@ -421,7 +452,7 @@ func describeCompareSide(sessionID string, s *session.Summary) sessionCompareSid
 
 // printSessionCompare writes to stdout, matching the other `ocr session`
 // subcommands.
-func printSessionCompare(beforeID, afterID string, before, after *session.Summary, result session.CompareResult) {
+func printSessionCompare(beforeID, afterID string, before, after *session.Summary, result session.CompareResult, metadata ...comparisonOutput) {
 	fmt.Printf("Comparing %s -> %s\n", beforeID, afterID)
 	fmt.Printf("  before: %s %s\n", displayMode(before.ReviewMode), describeRange(*before))
 	fmt.Printf("  after:  %s %s\n", displayMode(after.ReviewMode), describeRange(*after))
@@ -429,22 +460,26 @@ func printSessionCompare(beforeID, afterID string, before, after *session.Summar
 	if n := len(result.NotReviewed); n > 0 {
 		fmt.Printf("%d finding(s) in files the after session did not review (not counted as resolved)\n", n)
 	}
+	projected := projectComparison(result, nil, nil)
+	if len(metadata) > 0 {
+		projected = metadata[0]
+	}
 
 	for _, section := range []struct {
 		title    string
-		findings []model.LlmComment
+		findings []findingOutput
 	}{
-		{"New", result.New},
-		{"Persisting", result.Persisting},
-		{"Resolved", result.Resolved},
-		{"Not reviewed", result.NotReviewed},
+		{"New", projected.New},
+		{"Persisting", projected.Persisting},
+		{"Resolved", projected.Resolved},
+		{"Not reviewed", projected.NotReviewed},
 	} {
 		if len(section.findings) == 0 {
 			continue
 		}
 		fmt.Printf("\n=== %s (%d) ===\n", section.title, len(section.findings))
 		for _, c := range section.findings {
-			renderComment(c, os.Stdout)
+			renderFinding(c, os.Stdout)
 		}
 	}
 }

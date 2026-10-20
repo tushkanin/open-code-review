@@ -100,6 +100,13 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 - **シナリオに最適化されたプロンプト** — コードレビュー向けに深く最適化されたプロンプトテンプレートにより、効果を高めつつトークン消費を削減します。
 - **シナリオに最適化されたツールセット** — 大規模な本番データにおけるツール呼び出しトレースの詳細な分析 — 呼び出し頻度の分布、ツールごとの繰り返し率、新しいツールが呼び出しチェーン全体に与える影響など — から抽出された、汎用エージェントツールキットよりもコードレビューにおいて安定的で予測可能な専用ツールセットです。
 
+Diff reviews verify each candidate against captured repository evidence.
+OCR publishes confirmed and uncertain findings, with explicit uncertainty reasons.
+It retains refuted findings in the complete session report.
+`--no-filter` bypasses verification and labels every finding as unverified.
+JSON and SARIF expose the complete report separately from published findings.
+Use `ocr session export --json -o review.json` to export saved findings and their complete report.
+
 ## 使い方
 
 ### 前提条件

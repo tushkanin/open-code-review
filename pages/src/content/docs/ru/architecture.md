@@ -291,10 +291,7 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
    — если определить строки в нетривиальном diff не удалось, OCR запускает
    промпт `RE_LOCATION_TASK`, прося модель заново привязать фрагмент. Это
    полезно для перефразированных строк `existing_code`.
-3. **Фильтр ревью** — после завершения основного цикла (и опустошения пула
-   обработчиков) вызов LLM `REVIEW_FILTER_TASK` проверяет собранные комментарии
-   по diff и удаляет доказуемо неверные. Ошибки на этом этапе записываются в
-   журнал и игнорируются.
+3. **Verification** — each round drains its workers, persists candidates, and uses a fresh captured-evidence conversation. Errors retain incomplete uncertainty.
 4. **Повторное определение строк** — после возврата из `Agent.Run` команда
    верхнего уровня повторно запускает `diff.ResolveLineNumbers` для полного
    набора комментариев (см. `cmd/opencodereview/review_cmd.go`), чтобы
@@ -334,7 +331,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `PLAN_TASK` | Этап планирования — создаёт контрольный список. |
 | `MAIN_TASK` | Основной цикл ревью — выполняет вызовы `code_comment`. |
 | `MEMORY_COMPRESSION_TASK` | Создаёт сводку зоны сжатия. |
-| `REVIEW_FILTER_TASK` | Этап после основного цикла, удаляющий доказуемо неверные комментарии. |
+| `VERIFICATION_TASK` | Independent captured-evidence investigation with structured candidate-local decisions. |
 | `RE_LOCATION_TASK` | Повторно привязывает комментарий, для которого не удалось сопоставить `existing_code`. |
 
 Каждый промпт — это список ссылок `{role, prompt_file}` на файлы `.md` в
@@ -350,13 +347,11 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{diffs}}` | Diff всех файлов текущей группы: каждый файл обёрнут в элемент `<file>`, всё вместе — в `<review_files>`. |
 | `{{file_list}}` | Только для `GROUPING_TASK`: список метаданных изменённых файлов — путь, статус, число строк `+`/`-`. |
 | `{{plan_guidance}}` | Результат этапа планирования; удаляется, если планирование пропущено. |
-| `{{confirmed_comments}}` | Находки, подтверждённые в предыдущих раундах; в первом раунде пусто и удаляется. |
+| `{{prior_findings}}` | Earlier candidate claims with their actual verification dispositions; empty on round 1. |
 | `{{plan_tools}}` | Определения инструментов этапа планирования как обычный текст (формируются функцией `formatToolDefs`), используются в системном промпте `PLAN_TASK`. |
 | `{{requirement_background}}` | Эффективное содержимое `--background` или `--background-file` (файл имеет приоритет). |
 | `{{current_system_date_time}}` | Локальная метка времени запуска в формате `YYYY-MM-DD HH:MM` (без секунд и часового пояса). |
 | `{{context}}` | Только при сжатии: сообщения, преобразованные в XML для создания сводки. |
-| `{{path}}` | Ключ группы (пути файлов группы, соединённые запятыми), используемый в `REVIEW_FILTER_TASK`. |
-| `{{comments}}` | Накопленные комментарии (JSON), используемые в `REVIEW_FILTER_TASK`. |
 
 Подстановка плейсхолдеров реализована в
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).

@@ -196,6 +196,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if sealed != nil {
 		sealedInput = &sealed.Resolution
 	}
+	var resumeAdmission *session.ResumeRequest
+	if sealed != nil {
+		resumeAdmission = &session.ResumeRequest{Identity: sealed.Identity, Provider: rt.Provider, Model: rt.Model, ProviderExplicit: opts.provider != "", ModelExplicit: opts.model != ""}
+	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
 	fileReader := &tool.FileReader{
@@ -236,6 +240,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		ResumeAdmission:       resumeAdmission,
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,

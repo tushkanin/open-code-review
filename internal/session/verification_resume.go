@@ -20,12 +20,12 @@ const (
 )
 
 type VerificationReuseRequest struct {
-	Options     SessionOptions
-	Admission   ResumeRequest
-	Fingerprint string
-	Context     v.Context
-	View        *diff.EvidenceView
-	Provenance  v.Provenance
+	Options      SessionOptions
+	Admission    ResumeRequest
+	Fingerprints []string
+	Context      v.Context
+	View         *diff.EvidenceView
+	Provenance   v.Provenance
 }
 
 type VerificationReuse struct {
@@ -49,11 +49,19 @@ func (s *ResumeState) ReuseVerification(ctx context.Context, req VerificationReu
 	if err := s.ValidateResume(req.Admission); err != nil {
 		return fresh, err
 	}
-	item, ok := s.ReusableItem(req.Fingerprint)
-	if !ok {
-		fresh.Reason = "The parent manifest does not authorize checkpoint reuse."
-		return fresh, nil
+	if len(req.Fingerprints) == 0 {
+		return fresh, errors.New("verification reuse requires group checkpoints")
 	}
+	items := make([]ResumeItem, 0, len(req.Fingerprints))
+	for _, fingerprint := range req.Fingerprints {
+		item, ok := s.ReusableItem(fingerprint)
+		if !ok {
+			fresh.Reason = "The parent manifest does not authorize every group checkpoint."
+			return fresh, nil
+		}
+		items = append(items, item)
+	}
+	item := items[0]
 	id, err := req.Context.Identity()
 	if err != nil {
 		return fresh, err
@@ -61,9 +69,11 @@ func (s *ResumeState) ReuseVerification(ctx context.Context, req VerificationReu
 	if !req.Context.Matches(req.View) {
 		return fresh, errors.New("current verification context does not match captured evidence")
 	}
-	if req.Context.Mode != v.Enabled || s.verification.invalid != nil || item.Verification == nil || item.Verification.Version != VerificationEventVersion || item.Verification.ContextID != id {
-		fresh.Reason = "The checkpoint lacks valid matching verification context."
-		return fresh, nil
+	for _, member := range items {
+		if req.Context.Mode != v.Enabled || s.verification.invalid != nil || member.Verification == nil || member.Verification.Version != VerificationEventVersion || member.Verification.ContextID != id {
+			fresh.Reason = "The checkpoint lacks valid matching verification context."
+			return fresh, nil
+		}
 	}
 	if _, ok := s.verification.contexts[id]; !ok {
 		fresh.Reason = "The checkpoint lacks supported candidate capture."
@@ -89,7 +99,11 @@ func (s *ResumeState) ReuseVerification(ctx context.Context, req VerificationReu
 		return fresh, nil
 	}
 	result := VerificationReuse{Disposition: VerificationReusable, Item: item, Result: core.Result(), Core: core, Recheck: recheck}
-	if len(recheck) > 0 || !s.verification.bindingValid(item.Verification) {
+	bindingsValid := true
+	for _, member := range items {
+		bindingsValid = bindingsValid && s.verification.bindingValid(member.Verification)
+	}
+	if len(recheck) > 0 || !bindingsValid {
 		result.Disposition = VerificationRecheck
 		result.Reason = "The candidate context remains valid, but verification requires completion."
 	}

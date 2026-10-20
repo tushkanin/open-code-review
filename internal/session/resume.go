@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	v "github.com/alibaba/open-code-review/internal/verification"
@@ -42,11 +43,13 @@ type ResumeState struct {
 	// interrupted parent apart from one that closed with nothing to verify.
 	Closed bool
 
-	// reusable caches the parent manifest's completed and reused fingerprints,
-	// built on first use by ReusableItem. Reuse is decided on one goroutine
-	// before any dispatch begins, so this needs no lock.
+	// Group workers share this immutable index after its first initialization.
+	reusableOnce sync.Once
 	reusable     map[string]bool
 	verification verificationState
+	displayOrder []string
+	displayed    map[string]bool
+	legacyItems  []ResumeItem
 }
 
 // ResumeItem is a completed file-level checkpoint, keyed by diff fingerprint.
@@ -178,14 +181,11 @@ func (s *ResumeState) applyResumeLine(line []byte) error {
 	case "session_start":
 		s.applySessionStart(rec)
 	case "review_item_done", "review_item_reused":
-		if rec.Fingerprint == "" {
-			return nil
-		}
 		filePath := rec.FilePath
 		if filePath == "" {
 			filePath = rec.NewPath
 		}
-		s.Items[rec.Fingerprint] = ResumeItem{
+		item := ResumeItem{
 			FilePath:    filePath,
 			OldPath:     rec.OldPath,
 			NewPath:     rec.NewPath,
@@ -197,10 +197,21 @@ func (s *ResumeState) applyResumeLine(line []byte) error {
 			if err := json.Unmarshal(rec.Verification, &binding); err != nil || !s.verification.bindingValid(&binding) {
 				s.verification.fail(fmt.Errorf("invalid verification checkpoint binding"))
 			}
-			item := s.Items[rec.Fingerprint]
 			item.Verification = &binding
-			s.Items[rec.Fingerprint] = item
 		}
+		if rec.Fingerprint == "" {
+			s.legacyItems = append(s.legacyItems, item)
+			s.displayOrder = append(s.displayOrder, "")
+			return nil
+		}
+		if s.displayed == nil {
+			s.displayed = make(map[string]bool)
+		}
+		if !s.displayed[rec.Fingerprint] {
+			s.displayed[rec.Fingerprint] = true
+			s.displayOrder = append(s.displayOrder, rec.Fingerprint)
+		}
+		s.Items[rec.Fingerprint] = item
 	case "review_item_failed":
 		if rec.Fingerprint != "" {
 			delete(s.Items, rec.Fingerprint)
@@ -308,9 +319,9 @@ func (s *ResumeState) ReusableItem(fingerprint string) (ResumeItem, bool) {
 	if s == nil || s.Manifest == nil {
 		return ResumeItem{}, false
 	}
-	if s.reusable == nil {
+	s.reusableOnce.Do(func() {
 		s.reusable = manifestReusableFingerprints(s.Manifest)
-	}
+	})
 	if !s.reusable[fingerprint] {
 		return ResumeItem{}, false
 	}
