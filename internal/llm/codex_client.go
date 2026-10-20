@@ -69,13 +69,6 @@ func (c *CodexClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("Codex command: %w", err)
 	}
-	version, err := runCodexCommand(ctx, binary, dir, nil, "--version")
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(string(version)) != "codex-cli 0.162.1" {
-		return nil, fmt.Errorf("Codex incompatible version %q: supported release is 0.162.1", strings.TrimSpace(string(version)))
-	}
 	native, err := runCodexCommand(ctx, binary, dir, nil, "debug", "models", "--bundled")
 	if err != nil {
 		return nil, err

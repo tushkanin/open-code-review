@@ -216,8 +216,6 @@ func TestCodexProcessHelper(t *testing.T) {
 				os.Exit(13)
 			}
 			set(key, value)
-		case "--version":
-			stage = "version"
 		case "debug":
 			stage = "catalog"
 		case "features":
@@ -244,8 +242,6 @@ func TestCodexProcessHelper(t *testing.T) {
 		os.Exit(0)
 	}
 	switch stage {
-	case "version":
-		fmt.Println("codex-cli 0.162.1")
 	case "catalog":
 		fmt.Print(codexTestCatalog)
 	case "features":
@@ -399,7 +395,7 @@ func assertCodexCleanup(t *testing.T, dir string) {
 
 func TestCodexCompatibilityAndProcessFailures(t *testing.T) {
 	for _, scenario := range []struct{ stage, script string }{
-		{"version", "printf 'codex-cli 0.162.2'"}, {"features", "printf 'shell_tool stable false'"}, {"catalog", "printf '{}'"}, {"catalog", "exit 8"}, {"completion", "exit 9"}, {"completion", "printf 'not JSON'"}, {"completion", "sleep 5 &\nprintf '%s' '" + codexTestStream + "'"},
+		{"features", "printf 'shell_tool stable false'"}, {"catalog", "printf '{}'"}, {"catalog", "exit 8"}, {"completion", "exit 9"}, {"completion", "printf 'not JSON'"}, {"completion", "sleep 5 &\nprintf '%s' '" + codexTestStream + "'"},
 	} {
 		t.Run(scenario.stage+scenario.script, func(t *testing.T) {
 			tmp := installCodexTestCommand(t, scenario.stage, scenario.script)
@@ -426,7 +422,7 @@ func TestCodexCompatibilityAndProcessFailures(t *testing.T) {
 }
 
 func TestCodexCancellationCleanup(t *testing.T) {
-	for _, stage := range []string{"version", "catalog", "features", "preflight", "completion"} {
+	for _, stage := range []string{"catalog", "features", "preflight", "completion"} {
 		for _, mode := range []string{"cancel", "caller_deadline", "request_timeout"} {
 			t.Run(stage+"/"+mode, func(t *testing.T) {
 				tmp := installCodexTestCommand(t, stage, "touch scratch\nsleep 20 &\nwait\n")

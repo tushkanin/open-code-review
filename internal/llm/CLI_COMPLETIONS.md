@@ -110,8 +110,9 @@ OCR_CLAUDE_SMOKE=1 OCR_CLAUDE_SMOKE_MODEL=sonnet \
 ## Codex
 
 `NewCodexClient` implements the same contract through `codex exec`.
-The adapter supports codex-cli 0.162.1 only.
-Other releases return a compatibility error until their native controls receive a compatibility check.
+The adapter does not restrict the Codex CLI version.
+It checks the bundled model catalog, effective features, configuration, and event stream at runtime.
+These checks do not establish that every release disables all native tools.
 
 The adapter exports the bundled native catalog through `codex debug models --bundled`.
 The resolved model must match an exported identifier exactly.

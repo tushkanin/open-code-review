@@ -48,7 +48,7 @@ The native providers require a model but no OCR API key or HTTP URL.
 The form accepts custom model names and retains saved model choices.
 An HTTP protocol override restores the API-key field.
 Use `ocr config set providers.<name>.url <url>` for a saved URL override.
-Codex supports release `0.162.1` and requires an exact model from its bundled catalog.
+Codex requires an exact model from its bundled catalog and does not restrict the CLI version.
 Its suggested model is `gpt-6.1-sol`. Claude's suggested model is `sonnet`.
 OCR controls review scope, prompts, rules, and tool execution.
 See [CLI compatibility and limits](../../internal/llm/CLI_COMPLETIONS.md) for native safety controls and the Codex configuration race limit.
