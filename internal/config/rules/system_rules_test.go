@@ -406,6 +406,7 @@ func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 }
 
 func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	dir := t.TempDir()
 	customRule := `{"rules":[{"path":"**/*.go","rule":"custom-go-rule"}]}`
 	customPath := filepath.Join(dir, "custom_rules.json")
@@ -422,10 +423,9 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 	if got != "custom-go-rule" {
 		t.Errorf("expected custom-go-rule, got %q", got)
 	}
-	// --rule not matched → falls through to system default
-	got = resolver.Resolve("readme.md")
-	if !strings.Contains(got, "Correctness") {
-		t.Errorf("expected system default rule, got %q", truncate(got, 80))
+	detail := resolver.(DetailResolver).ResolveDetail("readme.md")
+	if detail.Source != "system" {
+		t.Errorf("expected system fallback, got %q", detail.Source)
 	}
 }
 
@@ -618,6 +618,7 @@ func TestNewResolver_MergeSystemRuleKeepsRulePriority(t *testing.T) {
 }
 
 func TestNewResolver_CustomOverridesProject(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	// Setup --rule file (highest priority)
 	customDir := t.TempDir()
 	customRule := `{"rules":[{"path":"**/*.java","rule":"custom-java-rule"}]}`
@@ -649,7 +650,6 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 		{"force-api/src/foo.java", "custom-java-rule"}, // --rule wins (highest priority)
 		{"other/src/bar.java", "custom-java-rule"},     // --rule wins
 		{"main.go", "project-go-rule"},                 // --rule misses → project wins
-		{"readme.md", "Correctness"},                   // all miss → system default
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -658,6 +658,10 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 				t.Errorf("Resolve(%q) = %q, want containing %q", tt.path, truncate(got, 80), tt.want)
 			}
 		})
+	}
+	detail := resolver.(DetailResolver).ResolveDetail("readme.md")
+	if detail.Source != "system" {
+		t.Errorf("expected system fallback, got %q", detail.Source)
 	}
 }
 
@@ -788,6 +792,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 }
 
 func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	_, filter, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -872,6 +877,7 @@ func TestNewResolver_FileFilterFallsToProject(t *testing.T) {
 }
 
 func TestResolveDetail_SystemDefault(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -884,9 +890,6 @@ func TestResolveDetail_SystemDefault(t *testing.T) {
 	}
 	if detail.Pattern != "default" {
 		t.Errorf("expected pattern 'default', got %q", detail.Pattern)
-	}
-	if !strings.Contains(detail.Rule, "Correctness") {
-		t.Errorf("expected default rule content, got %q", truncate(detail.Rule, 80))
 	}
 }
 

@@ -225,7 +225,7 @@ func TestParseDiffText_QuotedPathFromRealGit(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 
-	diffText := git("-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-color", "--unified=3", "HEAD", "--")
+	diffText := git("-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", "HEAD", "--")
 	if !strings.Contains(diffText, `"a/tab\tname.go"`) {
 		t.Fatalf("this git does not quote the header as expected:\n%s", diffText)
 	}

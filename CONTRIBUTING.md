@@ -125,6 +125,10 @@ make test
 make build
 ```
 
+Tests must isolate user configuration from their fixtures.
+Use `setTestHome` in rule resolver tests to avoid local OCR rules.
+Git diff fixtures must set explicit source and destination prefixes when assertions require `a/` and `b/`.
+
 ### Project Structure
 
 ```
