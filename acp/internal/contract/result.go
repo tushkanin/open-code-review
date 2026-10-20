@@ -44,7 +44,9 @@ type ReviewResult struct {
 	// Manifest is present for review but not for scan. The adapter reads
 	// run_failure/coverage classifications from it to cross-check a local
 	// cancel, because the CLI has no dedicated cancellation exit code.
-	Manifest *Manifest `json:"manifest,omitempty"`
+	Manifest               *Manifest               `json:"manifest,omitempty"`
+	VerificationReport     *VerificationReport     `json:"verification_report,omitempty"`
+	VerificationCompletion *VerificationCompletion `json:"verification_completion,omitempty"`
 }
 
 // ScanResult mirrors the JSON document `ocr scan --format json` writes to
@@ -84,14 +86,16 @@ type ToolCalls struct {
 // number. Severity is an open set (critical, high, medium, low have been
 // observed, but consumers must tolerate unknown values).
 type Comment struct {
-	Path           string `json:"path"`
-	Content        string `json:"content"` // always emitted; mirrors model.LlmComment's tag
-	SuggestionCode string `json:"suggestion_code,omitempty"`
-	ExistingCode   string `json:"existing_code,omitempty"`
-	StartLine      int    `json:"start_line"`
-	EndLine        int    `json:"end_line"`
-	Category       string `json:"category,omitempty"`
-	Severity       string `json:"severity,omitempty"`
+	Path           string               `json:"path"`
+	Content        string               `json:"content"` // always emitted; mirrors model.LlmComment's tag
+	SuggestionCode string               `json:"suggestion_code,omitempty"`
+	ExistingCode   string               `json:"existing_code,omitempty"`
+	StartLine      int                  `json:"start_line"`
+	EndLine        int                  `json:"end_line"`
+	Category       string               `json:"category,omitempty"`
+	Severity       string               `json:"severity,omitempty"`
+	CandidateID    string               `json:"candidate_id,omitempty"`
+	Verification   *VerificationSummary `json:"verification,omitempty"`
 }
 
 // Manifest mirrors the review run manifest (ocr.run-manifest/v1). Only the

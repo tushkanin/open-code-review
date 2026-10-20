@@ -126,13 +126,22 @@ func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeSt
 		return nil, fmt.Errorf("open resume session %q: %w", sessionID, err)
 	}
 	defer f.Close()
+	return replayResumeState(f, repoDir, sessionID, skipUnparseable)
+}
+
+// ReplayReviewSession reads the selected archive without a repository or home lookup.
+func ReplayReviewSession(reader io.Reader, sessionID string) (*ResumeState, error) {
+	return replayResumeState(reader, "", sessionID, true)
+}
+
+func replayResumeState(input io.Reader, repoDir, sessionID string, skipUnparseable bool) (*ResumeState, error) {
 
 	state := &ResumeState{
 		SessionID: sessionID,
 		RepoDir:   repoDir,
 		Items:     make(map[string]ResumeItem),
 	}
-	reader := bufio.NewReader(f)
+	reader := bufio.NewReader(input)
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if readErr == io.EOF {

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/session"
+	v "github.com/alibaba/open-code-review/internal/verification"
 )
 
 // SessionsRoot returns the root directory where session JSONL files are stored.
@@ -213,6 +214,17 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 		}
 	}
+	if readErr == nil && managedReviewMode(summary.ReviewMode) {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return summary, err
+		}
+		state, err := session.ReplayReviewSession(f, strings.TrimSuffix(filepath.Base(path), ".jsonl"))
+		if err != nil {
+			return summary, err
+		}
+		findings, _, _ := state.SavedFindings()
+		summary.CommentCount = len(findings)
+	}
 	return summary, readErr
 }
 
@@ -251,16 +263,23 @@ type ReviewComment struct {
 	EndLine        int
 	Category       string // bug, security, performance, maintainability, test, style, documentation, other
 	Severity       string // critical, high, medium, low
+	Thinking       string
+	CandidateID    string
+	Verification   *v.Summary
 	MarkID         string `json:"-"`
 }
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
-	Summary      SessionSummary
-	TokenUsage   TokenUsageSummary
-	Files        []*FileGroup     // ordered by file path
-	SessionTasks []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
-	Comments     []*ReviewComment // review findings from review_item_done/reused records
+	Summary                SessionSummary
+	TokenUsage             TokenUsageSummary
+	Files                  []*FileGroup     // ordered by file path
+	SessionTasks           []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
+	Comments               []*ReviewComment // review findings from review_item_done/reused records
+	VerificationReport     v.Report
+	VerificationError      string
+	VerificationCompletion verificationCompletion
+	ManagedReview          bool
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -504,6 +523,8 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 	markOccurrences := make(map[string]int)
+	checkpointComments := make(map[string][]*ReviewComment)
+	superseded := make(map[*ReviewComment]bool)
 
 	readErr := readJSONLLines(f, func(line []byte) {
 		var rec map[string]any
@@ -682,7 +703,17 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 		case "review_item_done", "review_item_reused":
 			fp, _ := rec["filePath"].(string)
+			if fp == "" && managedReviewMode(vs.Summary.ReviewMode) {
+				fp, _ = rec["newPath"].(string)
+			}
 			recUUID, _ := rec["uuid"].(string)
+			fingerprint, _ := rec["fingerprint"].(string)
+			if fingerprint != "" {
+				for _, comment := range checkpointComments[fingerprint] {
+					superseded[comment] = true
+				}
+				checkpointComments[fingerprint] = nil
+			}
 			if comments, ok := rec["comments"].([]any); ok {
 				for ci, c := range comments {
 					cm, ok := c.(map[string]any)
@@ -714,15 +745,45 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 					if v, ok := cm["severity"].(string); ok {
 						rc.Severity = v
 					}
+					if value, ok := cm["thinking"].(string); ok {
+						rc.Thinking = value
+					}
 					rc.MarkID = commentMarkID(recUUID, ci, rc, markOccurrences)
 					vs.Comments = append(vs.Comments, rc)
+					if fingerprint != "" {
+						checkpointComments[fingerprint] = append(checkpointComments[fingerprint], rc)
+					}
 				}
 			}
+
+		case "review_item_failed":
+			fingerprint, _ := rec["fingerprint"].(string)
+			for _, comment := range checkpointComments[fingerprint] {
+				superseded[comment] = true
+			}
+			delete(checkpointComments, fingerprint)
 
 		case "session_end":
 			applySessionEnd(&vs.Summary, rec)
 		}
 	})
+	if readErr == nil && managedReviewMode(vs.Summary.ReviewMode) {
+		comments := vs.Comments[:0]
+		for _, comment := range vs.Comments {
+			if !superseded[comment] {
+				comments = append(comments, comment)
+			}
+		}
+		vs.Comments = comments
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		state, err := session.ReplayReviewSession(f, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		vs.applySavedFindings(state)
+	}
 
 	// Aggregate token usage across all task cards
 	fileBreakdown := make([]FileTokenUsage, 0, len(vs.Files))

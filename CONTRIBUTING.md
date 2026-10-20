@@ -201,7 +201,8 @@ The fingerprint excludes conversation and candidate identifiers.
 Verifier request transcripts use `session.VerificationTask`.
 Ordinary transcripts do not replace structured verification events, checkpoints, replay, or resume admission.
 The review agent connects these APIs to structured session records and CLI output.
-Scans, delegation, and other presentation surfaces retain their separate behavior.
+The viewer and ACP adapter preserve the delivered verification metadata through their separate consumer paths.
+Scans, delegation, editor interfaces, and CI publishers retain their separate behavior.
 Run the runner fixtures with `make test PACKAGES=./internal/llmloop`.
 
 ### Durable verification sessions
@@ -236,6 +237,17 @@ Replay retains earlier intact audit records and reports invalid data through an 
 When replay detects invalid data, its publication retains recovered claims as incomplete uncertainty.
 Invalid checkpoint bindings retain saved comments and recoverable file claims without verification.
 A corrupt binding cannot select the recovery inventory.
+
+`ReplayReviewSession` reads an already selected JSONL stream through the same replay implementation.
+The viewer opens the file under its validated session root, including an archived root.
+It uses `SavedFindings` for publication and retains the complete report when replay reports an audit error.
+Live pages and default HTML export share this projection and template.
+Comparison consumes occurrence metadata from each side without changing the finding key.
+
+The ACP module models the CLI contract independently.
+Its explicit audit claim type excludes private reasoning before the final message serializes structured details.
+The complete audit remains separate from the delivered published `comments` array.
+Verification completion does not replace discovery coverage or terminal status.
 
 `ResumeState.ReuseVerification` runs existing mode, input, repository, rules, provider, model, and manifest admission first.
 Manifest coverage still decides whether a file checkpoint can participate.

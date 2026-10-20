@@ -96,7 +96,7 @@ func handleSession(w http.ResponseWriter, r *http.Request, root, repo, sessionID
 
 type compareBucket struct {
 	Title    string
-	Findings []model.LlmComment
+	Findings []*ReviewComment
 }
 
 type comparePageData struct {
@@ -123,16 +123,7 @@ func toLlmComments(comments []*ReviewComment) []model.LlmComment {
 		if c == nil {
 			continue
 		}
-		out = append(out, model.LlmComment{
-			Path:           c.FilePath,
-			Content:        c.Content,
-			SuggestionCode: c.SuggestionCode,
-			ExistingCode:   c.ExistingCode,
-			StartLine:      c.StartLine,
-			EndLine:        c.EndLine,
-			Category:       c.Category,
-			Severity:       c.Severity,
-		})
+		out = append(out, c.claim())
 	}
 	return out
 }
@@ -204,6 +195,17 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 		toLlmComments(av.Comments),
 		av.Summary.RunManifest,
 	)
+	afterPool := commentPool(av.Comments)
+	beforePool := commentPool(bv.Comments)
+	persisting := selectCommentMetadata(result.Persisting, afterPool)
+	newFindings := selectCommentMetadata(result.New, afterPool)
+	for _, claim := range result.MatchedBefore {
+		if matches := beforePool[claim]; len(matches) > 0 {
+			beforePool[claim] = matches[1:]
+		}
+	}
+	resolved := selectCommentMetadata(result.Resolved, beforePool)
+	notReviewed := selectCommentMetadata(result.NotReviewed, beforePool)
 
 	name := filepath.Base(av.Summary.CWD)
 	if name == "." || name == "" {
@@ -217,10 +219,10 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 		After:       av.Summary,
 		Warning:     modeWarning(bv.Summary, av.Summary),
 		Buckets: []compareBucket{
-			{Title: "New", Findings: result.New},
-			{Title: "Persisting", Findings: result.Persisting},
-			{Title: "Resolved", Findings: result.Resolved},
-			{Title: "Not reviewed", Findings: result.NotReviewed},
+			{Title: "New", Findings: newFindings},
+			{Title: "Persisting", Findings: persisting},
+			{Title: "Resolved", Findings: resolved},
+			{Title: "Not reviewed", Findings: notReviewed},
 		},
 	})
 }

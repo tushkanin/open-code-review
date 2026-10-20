@@ -325,13 +325,14 @@ func numberedCodeLines(code string, startLine, endLine int) []codeLine {
 
 func parseTemplate(name string) (*template.Template, error) {
 	funcMap := template.FuncMap{
-		"formatDuration": formatDuration,
-		"formatTime":     formatTime,
-		"truncate":       truncateText,
-		"formatNumber":   formatNumber,
-		"icon":           inlineIcon,
-		"dict":           dictKV,
-		"add":            func(a, b int) int { return a + b },
+		"structuredDetails": structuredDetails,
+		"formatDuration":    formatDuration,
+		"formatTime":        formatTime,
+		"truncate":          truncateText,
+		"formatNumber":      formatNumber,
+		"icon":              inlineIcon,
+		"dict":              dictKV,
+		"add":               func(a, b int) int { return a + b },
 		"countLabel": func(n int, singular, plural string) string {
 			if n == 1 {
 				return strconv.Itoa(n) + " " + singular

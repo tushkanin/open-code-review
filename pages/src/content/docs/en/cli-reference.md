@@ -514,6 +514,13 @@ ocr session export -o review.html
 ocr session export 20250601-100000-abc123 -o review.html
 ```
 
+Default HTML export shows the same supported published findings and complete verification audit as the live viewer.
+Uncertain findings show their reasons. Completion counts distinguish complete, incomplete, and skipped verification from discovery coverage.
+Expand each audit record for its original claim, support, citations, origins, context identity, provenance, and submitted decisions.
+Refuted claims remain in the audit but not in the finding count.
+Recovery warnings remain visible. Invalid metadata cannot confirm or suppress claims.
+Filters, pagination, and independent review marks work offline.
+
 Use `ocr session export --json -o review.json` for saved findings and the complete verification report.
 This interface includes refuted and interrupted candidates.
 Session detail also exposes the complete report.
@@ -526,8 +533,8 @@ With no session id the newest session for the repository is exported. That is
 the default because a *successful* `ocr review` never prints its session id.
 Without `-o` the HTML goes to stdout.
 
-The exported page embeds the reviewed source excerpts the session recorded, so
-treat the file with the same care as the repository itself before publishing it.
+The exported page embeds saved reasoning and source excerpts, including evidence outside the changed lines.
+Treat the file as sensitive repository data before you share it.
 
 | Flag | Default | Description |
 |---|---|---|
